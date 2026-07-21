@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import contextlib
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -14,6 +15,8 @@ from aiohttp import web
 from aiohttp.web import Application
 
 from ytdlp_bot.bootstrap import bootstrap, shutdown_runtime
+
+log = logging.getLogger("ytdlp_bot.main")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,13 +27,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("config.toml"),
         help="Path to static configuration TOML",
     )
+    parser.add_argument(
+        "--fixture-workers",
+        action="store_true",
+        help="Use fixture media worker (deterministic CI / dry-run)",
+    )
     return parser
 
 
-async def _async_main(config_path: Path) -> int:
-    log = logging.getLogger("ytdlp_bot.main")
+async def _async_main(config_path: Path, *, fixture_workers: bool) -> int:
     try:
-        runtime = await bootstrap(config_path)
+        runtime = await bootstrap(
+            config_path,
+            fixture_workers=fixture_workers or os.environ.get("YTDLP_BOT_FIXTURE_WORKER") == "1",
+            start_background=True,
+        )
     except Exception as exc:
         log.error("startup failed: %s", type(exc).__name__)
         return 1
@@ -45,11 +56,12 @@ async def _async_main(config_path: Path) -> int:
         runtime.config.http.bind_host,
         runtime.config.http.bind_port,
     )
-    stop = asyncio.Event()
 
     def _signal_handler() -> None:
         runtime.health.close_admission()
-        stop.set()
+        if runtime.command_service is not None:
+            runtime.command_service.admission_open = False
+        runtime.stop_event.set()
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -58,10 +70,13 @@ async def _async_main(config_path: Path) -> int:
 
     try:
         await site.start()
-        if not runtime.readiness.is_ready():
-            log.error("readiness false after bootstrap")
-            return 2
-        await stop.wait()
+        log.info(
+            "listening http://%s:%s ready=%s",
+            runtime.config.http.bind_host,
+            runtime.config.http.bind_port,
+            runtime.readiness.is_ready(),
+        )
+        await runtime.stop_event.wait()
     finally:
         await runner.cleanup()
         await shutdown_runtime(runtime)
@@ -71,7 +86,7 @@ async def _async_main(config_path: Path) -> int:
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
-        code = asyncio.run(_async_main(args.config))
+        code = asyncio.run(_async_main(args.config, fixture_workers=args.fixture_workers))
     except KeyboardInterrupt:
         code = 130
     sys.exit(code)

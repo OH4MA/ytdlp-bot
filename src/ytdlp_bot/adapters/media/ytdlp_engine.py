@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ytdlp_bot.domain.enums import MediaMode
@@ -61,7 +62,7 @@ def options_for_request(
         quality=quality if isinstance(quality, VideoQuality) else None,
         bitrate=bitrate if isinstance(bitrate, AudioBitrate) else None,
     )
-    tmpl = "%(id)s.%(ext)s"
+    tmpl = str(Path(workspace) / "%(id)s.%(ext)s")
     return build_ytdlp_options(
         sel,
         workspace=workspace,
@@ -69,3 +70,32 @@ def options_for_request(
         network_attempts=network_attempts,
         outtmpl=tmpl,
     )
+
+
+def run_ytdlp_download(
+    source_url: str,
+    options: YtdlpOptions,
+    *,
+    workspace: Path,
+) -> Path:
+    """Invoke pinned yt-dlp Python API; return primary output path."""
+    from yt_dlp import YoutubeDL  # type: ignore[import-untyped]
+
+    workspace.mkdir(parents=True, exist_ok=True)
+    before = {p.resolve() for p in workspace.rglob("*") if p.is_file()}
+    opts = dict(options.raw)
+    opts["paths"] = {"home": str(workspace)}
+    with YoutubeDL(opts) as ydl:
+        ydl.download([source_url])
+    after = [p for p in workspace.rglob("*") if p.is_file() and p.resolve() not in before]
+    if not after:
+        # Fallback: any media-like file in workspace.
+        after = [
+            p
+            for p in workspace.rglob("*")
+            if p.is_file() and p.suffix.lower() in {".mp4", ".mp3", ".m4a", ".webm", ".mkv"}
+        ]
+    if not after:
+        raise RuntimeError("yt-dlp produced no output file")
+    after.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return after[0]
