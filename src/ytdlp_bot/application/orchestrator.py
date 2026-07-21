@@ -74,11 +74,16 @@ class Orchestrator:
                 WorkerPhase.FINALIZING: JobState.DELIVERING,
             }
             target = mapping.get(event.phase)
-            if target and target is not job.state and job.state not in {
-                JobState.COMPLETED,
-                JobState.FAILED,
-                JobState.CANCELLED,
-            }:
+            if (
+                target
+                and target is not job.state
+                and job.state
+                not in {
+                    JobState.COMPLETED,
+                    JobState.FAILED,
+                    JobState.CANCELLED,
+                }
+            ):
                 await self.jobs.transition(
                     job.job_id, expected_version=job.version, new_state=target
                 )

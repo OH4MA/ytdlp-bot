@@ -72,9 +72,7 @@ class Dispatcher:
             did = await self.run_once()
             if not did:
                 with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(
-                        self._wake.wait(), timeout=self.scan_interval_seconds
-                    )
+                    await asyncio.wait_for(self._wake.wait(), timeout=self.scan_interval_seconds)
                 self._wake.clear()
 
     def stop(self) -> None:

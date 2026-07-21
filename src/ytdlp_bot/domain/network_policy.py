@@ -61,13 +61,9 @@ def parse_public_http_url(
         try:
             host_out = host.encode("idna").decode("ascii").lower().rstrip(".")
         except Exception as exc:
-            raise ValidationError(
-                failure(FailureCode.INVALID_URL, diagnostic="idna")
-            ) from exc
+            raise ValidationError(failure(FailureCode.INVALID_URL, diagnostic="idna")) from exc
         if not _HOSTNAME_RE.fullmatch(host_out):
-            raise ValidationError(
-                failure(FailureCode.INVALID_URL, diagnostic="hostname")
-            ) from None
+            raise ValidationError(failure(FailureCode.INVALID_URL, diagnostic="hostname")) from None
 
     path = parsed.path or ""
     query = f"?{parsed.query}" if parsed.query else ""

@@ -118,9 +118,7 @@ class JobService:
             bitrate = args.bitrate
 
         try:
-            validated: ValidatedUrl = await self.url_safety.validate(
-                url, now=self.clock.now()
-            )
+            validated: ValidatedUrl = await self.url_safety.validate(url, now=self.clock.now())
             _ = DownloadRequest(
                 source_url=validated.normalized_url,
                 mode=mode,
@@ -148,17 +146,13 @@ class JobService:
         )
         await self.jobs.create(job)
         await self.payloads.put(
-            JobPayload(
-                job_id=job_id, source_url=validated.normalized_url, created_at=now
-            )
+            JobPayload(job_id=job_id, source_url=validated.normalized_url, created_at=now)
         )
 
         lock = self._lock_for(idem)
         async with lock:
             try:
-                ref = await self.platform.acknowledge_job(
-                    context, job_id, JobState.QUEUED
-                )
+                ref = await self.platform.acknowledge_job(context, job_id, JobState.QUEUED)
             except Exception:
                 await self.payloads.delete(job_id)
                 await self.jobs.transition(
@@ -236,9 +230,7 @@ class JobService:
                 state=job.state.value,
                 message_key="status.view",
             )
-        result = await self.jobs.request_cancellation(
-            job.job_id, expected_version=job.version
-        )
+        result = await self.jobs.request_cancellation(job.job_id, expected_version=job.version)
         if isinstance(result, Ok):
             if result.value.state is JobState.CANCELLING:
                 fin = await self.jobs.transition(
