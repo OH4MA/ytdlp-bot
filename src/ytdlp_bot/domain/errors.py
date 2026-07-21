@@ -29,7 +29,11 @@ def _sanitize_context(context: Mapping[str, Any] | None) -> dict[str, str | int 
         key = str(raw_key)
         if not key or len(key) > 64:
             continue
-        if isinstance(value, bool) or (isinstance(value, int) and not isinstance(value, bool)) or isinstance(value, float):
+        if (
+            isinstance(value, bool)
+            or (isinstance(value, int) and not isinstance(value, bool))
+            or isinstance(value, float)
+        ):
             out[key] = value
         elif isinstance(value, str):
             out[key] = value[:_MAX_CONTEXT_VALUE_LEN]
