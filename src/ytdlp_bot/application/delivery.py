@@ -41,14 +41,31 @@ class LinkIssuer(Protocol):
     ) -> object: ...
 
 
+class ArtifactPathResolver(Protocol):
+    def resolve_artifact_path(self, storage_key: str) -> str: ...
+
+
 @dataclass
 class DeliveryService:
     platform: PlatformDelivery
     link_issuer: LinkIssuer
     link_lifetime_seconds: int
+    path_resolver: ArtifactPathResolver | None = None
 
     def plan_for(self, artifact: Artifact, limit_bytes: int) -> DeliveryPlanDecision:
         return DeliveryPlanDecision.decide(artifact.byte_size, limit_bytes)
+
+    def _local_path(self, storage_key: str) -> str | None:
+        if self.path_resolver is None:
+            return None
+        try:
+            return self.path_resolver.resolve_artifact_path(storage_key)
+        except Exception:
+            return None
+
+    def _issued_url(self, link: object) -> str | None:
+        url = getattr(link, "url", None)
+        return url if isinstance(url, str) and url else None
 
     async def deliver(
         self,
@@ -62,6 +79,7 @@ class DeliveryService:
     ) -> DeliveryResult:
         decision = self.plan_for(artifact, context.effective_upload_limit_bytes)
         if decision.plan is DeliveryPlan.DIRECT_UPLOAD:
+            local_path = self._local_path(artifact.storage_key)
             outcome = await self.platform.upload_artifact(
                 context,
                 ArtifactDescriptor(
@@ -70,6 +88,7 @@ class DeliveryService:
                     media_type=artifact.media_type.value,
                     byte_size=artifact.byte_size,
                     storage_key=artifact.storage_key,
+                    local_path=local_path,
                 ),
             )
             if outcome is UploadOutcome.UPLOADED:
@@ -109,15 +128,16 @@ class DeliveryService:
             artifact_expires_at=artifact.expires_at,
             job_id=job_id.value,
         )
+        download_url = self._issued_url(link)
         view = FinalOutcomeView(
             job_id=job_id,
             outcome="completed_with_errors" if partial else "completed",
             message_key=("outcome.completed_with_errors" if partial else "outcome.completed"),
             has_signed_link_hint=True,
             delivery_plan=DeliveryPlan.SIGNED_LINK,
+            download_url=download_url,
         )
         await self.platform.send_final(message_reference, view)
-        # URL is returned only ephemerally (not persisted).
         expires = getattr(link, "expires_at", None)
         return DeliveryResult(
             plan=DeliveryPlan.SIGNED_LINK,

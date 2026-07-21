@@ -161,9 +161,10 @@ class TelegramPlatformAdapter:
         from aiogram.types import FSInputFile
 
         bot: Bot = self._bot  # type: ignore[assignment]
-        # storage_key is opaque; callers must resolve path via store before upload.
-        # For production composition, descriptor.storage_key may be absolute path.
-        path = Path(descriptor.storage_key)
+        # Prefer delivery-resolved local_path; never treat opaque storage_key as a path.
+        if not descriptor.local_path:
+            return UploadOutcome.FAILED
+        path = Path(descriptor.local_path)
         if not path.is_file():
             return UploadOutcome.FAILED
         try:
@@ -182,6 +183,8 @@ class TelegramPlatformAdapter:
 
     async def send_final(self, message_reference: MessageReference, view: FinalOutcomeView) -> None:
         text = f"job {view.job_id.value} outcome={view.outcome}"
+        if view.download_url:
+            text = f"{text}\n{view.download_url}"
         if self._bot is not None:
             from aiogram import Bot
 

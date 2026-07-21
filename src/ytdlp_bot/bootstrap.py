@@ -296,14 +296,33 @@ async def bootstrap(
         config.artifacts.signing_secret.encode("utf-8"),
         public_base_url=config.artifacts.public_base_url,
     )
+    capacity = CapacityManager(
+        store=store,
+        capacity_bytes=config.storage.capacity_bytes,
+        safety_headroom_bytes=config.storage.safety_headroom_bytes,
+        unknown_size_initial_reservation_bytes=config.storage.unknown_size_initial_reservation_bytes,
+        reservation_growth_bytes=config.storage.reservation_growth_bytes,
+    )
     delivery = DeliveryService(
         platform=platform_port,
         link_issuer=DownloadLinkIssuer(signer),
         link_lifetime_seconds=config.artifacts.link_expiry_seconds,
+        path_resolver=store,
     )
     progress = ProgressReporter(
         edit_progress=platform_port.edit_progress,
         interval=__import__("datetime").timedelta(seconds=config.app.progress_interval_seconds),
+    )
+    from ytdlp_bot.application.capacity_publish import PublishService
+
+    publisher = PublishService(
+        capacity=capacity,
+        store=store,
+        artifacts=arts,
+        jobs=jobs,
+        payloads=payloads,
+        ids=ids,
+        retention_seconds=config.artifacts.retention_seconds,
     )
     orchestrator = Orchestrator(
         jobs=jobs,
@@ -315,6 +334,7 @@ async def bootstrap(
         ids=ids,
         retention_seconds=config.artifacts.retention_seconds,
         now_fn=clock.now,
+        publisher=publisher,
     )
     workers = ProcessWorkerSupervisor(fixture_mode=fixture_workers)
 
@@ -322,6 +342,12 @@ async def bootstrap(
         payload = await payloads.get(job.job_id)
         if payload is None:
             return
+        # Reserve capacity before spawning work.
+        await capacity.reserve(
+            job.job_id,
+            known_size=None,
+            now=clock.now(),
+        )
         ws = await store.create_job_workspace(job.job_id)
         quality = None
         bitrate = None
@@ -424,13 +450,8 @@ async def bootstrap(
         if dc_cfg and dc_cfg.enabled and discord.bot_token:
             runtime.platform_tasks.append(asyncio.create_task(discord.start_gateway()))
 
-    _ = CapacityManager(
-        store=store,
-        capacity_bytes=config.storage.capacity_bytes,
-        safety_headroom_bytes=config.storage.safety_headroom_bytes,
-        unknown_size_initial_reservation_bytes=config.storage.unknown_size_initial_reservation_bytes,
-        reservation_growth_bytes=config.storage.reservation_growth_bytes,
-    )
+    # Capacity is retained via publisher/orchestrator/launch closures.
+    _ = capacity
     return runtime
 
 

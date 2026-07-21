@@ -180,8 +180,10 @@ class DiscordPlatformAdapter:
         import discord
 
         channel = self._client.get_channel(int(context.chat_id))  # type: ignore[union-attr]
-        path = Path(descriptor.storage_key)
-        if channel is None or not path.is_file():
+        if channel is None or not descriptor.local_path:
+            return UploadOutcome.FAILED
+        path = Path(descriptor.local_path)
+        if not path.is_file():
             return UploadOutcome.FAILED
         try:
             await channel.send(  # type: ignore[union-attr]
@@ -196,6 +198,9 @@ class DiscordPlatformAdapter:
 
     async def send_final(self, message_reference: MessageReference, view: FinalOutcomeView) -> None:
         self.calls.append(("send_final", (message_reference, view)))
+        content = f"job {view.job_id.value} {view.outcome}"
+        if view.download_url:
+            content = f"{content}\n{view.download_url}"
         if self._client is None:
             return
         channel = self._client.get_channel(int(message_reference.chat_id))  # type: ignore[union-attr]
@@ -203,9 +208,9 @@ class DiscordPlatformAdapter:
             return
         try:
             msg = await channel.fetch_message(int(message_reference.message_id))  # type: ignore[union-attr]
-            await msg.edit(content=f"job {view.job_id.value} {view.outcome}")
+            await msg.edit(content=content)
         except Exception:
-            await channel.send(f"job {view.job_id.value} {view.outcome}")  # type: ignore[union-attr]
+            await channel.send(content)  # type: ignore[union-attr]
 
     async def send_command_response(self, context: MessageContext, result: CommandResult) -> None:
         self.calls.append(("send_command_response", (context, result)))

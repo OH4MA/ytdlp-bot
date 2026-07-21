@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
+from ytdlp_bot.application.capacity_publish import PublishService
 from ytdlp_bot.application.delivery import DeliveryService
 from ytdlp_bot.application.progress_reporter import ProgressReporter
 from ytdlp_bot.domain.enums import JobState, MediaType, WorkerPhase
@@ -56,6 +57,7 @@ class Orchestrator:
     ids: IdGenerator
     retention_seconds: int
     now_fn: object  # Callable[[], datetime]
+    publisher: PublishService | None = None
 
     async def handle_event(self, event: WorkerEvent) -> None:
         job = await self.jobs.get(event.job_id)
@@ -120,27 +122,41 @@ class Orchestrator:
             path = str(event.payload["path"])
             display = str(event.payload.get("display_name", "artifact.bin"))
             media = str(event.payload.get("media_type", "video/mp4"))
-            raw_size = event.payload.get("byte_size")
-            size = int(raw_size) if isinstance(raw_size, (int, str)) else Path(path).stat().st_size
-            key = self.ids.storage_key()
-            await self.store.atomically_publish(path, key)
-            art = Artifact(
-                artifact_id=ArtifactId(self.ids.artifact_id()),
-                job_id=job.job_id,
-                storage_key=key,
-                display_name=display,
-                media_type=MediaType(media),
-                byte_size=size,
-                ready_at=now,
-                expires_at=now + timedelta(seconds=self.retention_seconds),
-            )
-            art = await self.artifacts.create_available(art)
-            await self.payloads.delete(job.job_id)
-            tr = await self.jobs.transition(
-                job.job_id, expected_version=job.version, new_state=JobState.DELIVERING
-            )
-            if isinstance(tr, Ok):
-                job = tr.value
+            if self.publisher is not None:
+                art = await self.publisher.publish_candidate(
+                    job=job,
+                    source_path=path,
+                    display_name=display,
+                    media_type=MediaType(media),
+                    now=now,
+                )
+                job = await self.jobs.get(job.job_id) or job
+            else:
+                raw_size = event.payload.get("byte_size")
+                size = (
+                    int(raw_size) if isinstance(raw_size, (int, str)) else Path(path).stat().st_size
+                )
+                key = self.ids.storage_key()
+                await self.store.atomically_publish(path, key)
+                art = Artifact(
+                    artifact_id=ArtifactId(self.ids.artifact_id()),
+                    job_id=job.job_id,
+                    storage_key=key,
+                    display_name=display,
+                    media_type=MediaType(media),
+                    byte_size=size,
+                    ready_at=now,
+                    expires_at=now + timedelta(seconds=self.retention_seconds),
+                )
+                art = await self.artifacts.create_available(art)
+                await self.payloads.delete(job.job_id)
+                tr = await self.jobs.transition(
+                    job.job_id,
+                    expected_version=job.version,
+                    new_state=JobState.DELIVERING,
+                )
+                if isinstance(tr, Ok):
+                    job = tr.value
             if job.message_reference is not None:
                 await self.delivery.deliver(
                     job_id=job.job_id,

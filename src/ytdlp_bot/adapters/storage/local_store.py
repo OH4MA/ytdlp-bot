@@ -43,6 +43,13 @@ class LocalArtifactStore:
             raise StorageError("artifact path escape")
         return path
 
+    def resolve_artifact_path(self, storage_key: str) -> str:
+        """Return absolute regular-file path for an opaque storage key."""
+        path = self._artifact_path(storage_key)
+        if path.is_symlink() or not path.is_file():
+            raise StorageError("artifact missing or not a regular file")
+        return str(path)
+
     async def create_job_workspace(self, job_id: JobId) -> str:
         path = self._workspace_dir(job_id)
         path.mkdir(mode=0o700, parents=False, exist_ok=False)

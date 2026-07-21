@@ -233,7 +233,11 @@ class DeliveryResult:
 
 @dataclass(frozen=True, slots=True)
 class FinalOutcomeView:
-    """Safe final outcome for send_final."""
+    """Safe final outcome for send_final.
+
+    download_url is ephemeral for the platform message only and must never be
+    persisted to SQLite or logs as a durable field.
+    """
 
     job_id: JobId
     outcome: Literal[
@@ -250,14 +254,20 @@ class FinalOutcomeView:
     error_code: FailureCode | None = None
     has_signed_link_hint: bool = False
     delivery_plan: DeliveryPlan | None = None
+    download_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class ArtifactDescriptor:
-    """Descriptor for platform upload (no absolute storage path)."""
+    """Descriptor for platform upload.
+
+    storage_key is the opaque store key. local_path is resolved by delivery
+    against ArtifactStore immediately before upload and is not persisted.
+    """
 
     artifact_id: str
     display_name: str
     media_type: str
     byte_size: int
     storage_key: str
+    local_path: str | None = None
