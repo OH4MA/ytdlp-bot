@@ -1,0 +1,1 @@
+"""Process entrypoint (composition only)."""

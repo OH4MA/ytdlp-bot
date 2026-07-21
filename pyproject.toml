@@ -1,0 +1,109 @@
+[project]
+name = "ytdlp-bot"
+version = "0.1.0"
+description = "Self-hosted Telegram/Discord yt-dlp media bot with signed download fallback"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiogram>=3.15.0,<4",
+    "discord.py>=2.4.0,<3",
+    "aiohttp>=3.11.0,<4",
+    "aiosqlite>=0.20.0,<1",
+    "yt-dlp>=2025.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.9.0",
+    "pyright>=1.1.390",
+]
+
+[project.scripts]
+ytdlp-bot = "ytdlp_bot.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ytdlp_bot"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/ytdlp_bot/locales/zh_TW.json" = "ytdlp_bot/locales/zh_TW.json"
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "RUF",
+]
+ignore = [
+    "E501",
+    "UP046",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ytdlp_bot"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = ["**/__pycache__", ".venv"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+reportMissingImports = true
+reportMissingTypeStubs = false
+reportUnnecessaryIsInstance = "none"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-ra",
+]
+markers = [
+    "unit: pure unit tests",
+    "contract: port contract tests",
+    "integration: integration tests with local fixtures",
+    "security: security and adversarial tests",
+    "deployment: container and compose smoke tests",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["ytdlp_bot"]
+omit = [
+    "*/adapters/platform/*",
+    "*/main.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 0

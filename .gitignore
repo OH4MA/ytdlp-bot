@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Tooling / coverage
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Runtime / local state
+*.sqlite3
+*.sqlite3-*
+/var/
+/data/
+/tmp-work/
+
+# Secrets and local config
+config.toml
+secrets/
+*.pem
+*.key
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Docker local overrides
+compose.override.yaml
+compose.override.yml
+
+# Local design / task docs (not versioned)
+/doc/
