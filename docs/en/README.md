@@ -53,6 +53,21 @@ Health: private `/healthz` (liveness) and `/readyz` (readiness). Public download
 - Logs must never contain bot tokens, signing secrets, complete bearer URLs, or sensitive source URL components.
 - Run the app as non-root with a read-only root filesystem expectation.
 
+## Alerts and runbooks
+
+| Signal | Meaning | Operator action |
+| --- | --- | --- |
+| `/readyz` not ready | Admission closed | Inspect logs for recovery/egress/storage; fix config or disk |
+| Capacity denials rising | Storage near limit | Raise `capacity_bytes` with admin confirmation, or free disk |
+| Cleanup last_error set | Deletion retry stuck | Check filesystem permissions and artifact leases |
+| Worker spawn failures | Media pipeline unhealthy | Verify FFmpeg/yt-dlp in image; enable fixture mode only for CI |
+
+Backup: stop writers, copy SQLite + WAL/SHM under `state/`, copy `data/artifacts/`. Restore onto empty volumes before starting.
+
+Upgrade: pull image, `docker compose up -d`, confirm `/readyz`, run controlled live smoke.
+
 ## Live smoke (manual)
 
 With real credentials (not part of routine CI): submit `/ytdl` and `/ytmp3` on both platforms, verify progress, cancel, status, direct upload below limit, signed link above limit, and restart reconciliation.
+
+Release acceptance traceability maps AC01–AC18 to `doc/tasks/progress.md` checkboxes and the CI job in `.github/workflows/ci.yml`.

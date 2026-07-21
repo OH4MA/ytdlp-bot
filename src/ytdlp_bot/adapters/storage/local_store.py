@@ -144,6 +144,10 @@ class LocalArtifactStore:
         st = path.lstat()
         return FileStat(size=st.st_size, is_symlink=stat.S_ISLNK(st.st_mode))
 
+    async def exists(self, storage_key: str) -> bool:
+        path = self._artifact_path(storage_key)
+        return path.is_file() and not path.is_symlink()
+
     async def delete(self, storage_key: str) -> None:
         path = self._artifact_path(storage_key)
         if path.exists() or path.is_symlink():

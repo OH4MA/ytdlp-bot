@@ -11,8 +11,11 @@ from ytdlp_bot.application.authorization import AuthorizationService
 from ytdlp_bot.domain.commands import (
     AdminAccessModeSet,
     AdminArgs,
+    AdminArtifactDelete,
+    AdminCancel,
     AdminCapacitySet,
     AdminRetentionSet,
+    AdminSettingReset,
     AdminStatus,
     AdminView,
     AdminWhitelistAdd,
@@ -20,12 +23,14 @@ from ytdlp_bot.domain.commands import (
     AdminWhitelistRemove,
     CommandRequest,
     CommandResult,
+    StatusView,
     UserError,
 )
-from ytdlp_bot.domain.enums import FailureCode
+from ytdlp_bot.domain.enums import DeletionReason, FailureCode, JobState
 from ytdlp_bot.domain.errors import AuthorizationError
 from ytdlp_bot.domain.identity import Identity
 from ytdlp_bot.domain.settings import validate_setting_value
+from ytdlp_bot.ports.results import Ok
 
 
 class SettingsPort(Protocol):
@@ -64,6 +69,34 @@ class ConfirmationPort(Protocol):
     ) -> bool: ...
 
 
+class JobAdminPort(Protocol):
+    async def get(self, job_id: object) -> object | None: ...
+    async def request_cancellation(self, job_id: object, *, expected_version: int) -> object: ...
+    async def transition(
+        self, job_id: object, *, expected_version: int, new_state: JobState, error_code=None
+    ) -> object: ...
+
+
+class ArtifactAdminPort(Protocol):
+    async def get(self, artifact_id: object) -> object | None: ...
+    async def get_for_job(self, job_id: object) -> object | None: ...
+    async def mark_deletion_pending(
+        self,
+        artifact_id: object,
+        *,
+        expected_version: int,
+        reason: DeletionReason,
+        now: datetime,
+    ) -> object: ...
+    async def finish_deletion(
+        self, artifact_id: object, *, expected_version: int, now: datetime
+    ) -> object: ...
+
+
+class FileAdminPort(Protocol):
+    async def delete(self, storage_key: str) -> None: ...
+
+
 @dataclass
 class AdminService:
     auth: AuthorizationService
@@ -72,6 +105,9 @@ class AdminService:
     confirmations: ConfirmationPort
     id_confirmation: Any  # IdGenerator-like
     confirmation_ttl: timedelta = timedelta(seconds=60)
+    jobs: JobAdminPort | None = None
+    artifacts: ArtifactAdminPort | None = None
+    files: FileAdminPort | None = None
 
     async def handle(self, request: CommandRequest, args: AdminArgs) -> CommandResult:
         try:
@@ -173,4 +209,103 @@ class AdminService:
                     "new": action.capacity_bytes,
                 },
             )
+        if isinstance(action, AdminSettingReset):
+            key = action.setting_key
+            if not key:
+                return UserError(
+                    code=FailureCode.INVALID_COMMAND, message_key="failure.invalid_command"
+                )
+            # Reset means re-applying the documented default for known keys.
+            defaults = {
+                "retention_seconds": 43200,
+                "link_expiry_seconds": 3600,
+            }
+            if key not in defaults:
+                return UserError(
+                    code=FailureCode.INVALID_COMMAND, message_key="failure.invalid_command"
+                )
+            value = defaults[key]
+            validate_setting_value(key, value)
+            await self.settings.set_override(
+                key,
+                value,
+                updated_by=request.identity,
+                now=now,
+            )
+            return AdminView(
+                message_key="admin.setting_updated",
+                safe_fields={"key": key, "old": "", "new": value},
+            )
+        if isinstance(action, AdminCancel):
+            if self.jobs is None:
+                return UserError(
+                    code=FailureCode.INTERNAL_ERROR, message_key="failure.internal_error"
+                )
+            job = await self.jobs.get(action.job_id)
+            if job is None:
+                return UserError(
+                    code=FailureCode.NOT_AUTHORIZED, message_key="failure.not_authorized"
+                )
+            version = getattr(job, "version", 0)
+            state = getattr(job, "state", None)
+            if state in {JobState.COMPLETED, JobState.CANCELLED, JobState.FAILED}:
+                return StatusView(
+                    job_id=action.job_id,
+                    state=state.value if state else "unknown",
+                    message_key="status.view",
+                )
+            result = await self.jobs.request_cancellation(
+                action.job_id, expected_version=int(version)
+            )
+            if isinstance(result, Ok):
+                current = result.value
+                fin = await self.jobs.transition(
+                    action.job_id,
+                    expected_version=getattr(current, "version", version),
+                    new_state=JobState.CANCELLED,
+                )
+                if isinstance(fin, Ok):
+                    return StatusView(
+                        job_id=action.job_id,
+                        state=JobState.CANCELLED.value,
+                        message_key="outcome.cancelled",
+                    )
+            return UserError(code=FailureCode.INTERNAL_ERROR, message_key="failure.internal_error")
+        if isinstance(action, AdminArtifactDelete):
+            if self.artifacts is None or self.files is None:
+                return UserError(
+                    code=FailureCode.INTERNAL_ERROR, message_key="failure.internal_error"
+                )
+            art = await self.artifacts.get(action.artifact_id)
+            if art is None:
+                return UserError(
+                    code=FailureCode.NOT_AUTHORIZED, message_key="failure.not_authorized"
+                )
+            pending = await self.artifacts.mark_deletion_pending(
+                action.artifact_id,
+                expected_version=int(getattr(art, "version", 0)),
+                reason=DeletionReason.ADMINISTRATOR,
+                now=now,
+            )
+            if not isinstance(pending, Ok):
+                return UserError(
+                    code=FailureCode.INTERNAL_ERROR, message_key="failure.internal_error"
+                )
+            try:
+                await self.files.delete(str(getattr(art, "storage_key", "")))
+            except Exception:
+                return UserError(
+                    code=FailureCode.INTERNAL_ERROR, message_key="failure.internal_error"
+                )
+            fin = await self.artifacts.finish_deletion(
+                action.artifact_id,
+                expected_version=getattr(pending.value, "version", 0),
+                now=now,
+            )
+            if isinstance(fin, Ok):
+                return AdminView(
+                    message_key="admin.view",
+                    safe_fields={"op": "artifact_delete", "id": action.artifact_id.value},
+                )
+            return UserError(code=FailureCode.INTERNAL_ERROR, message_key="failure.internal_error")
         return UserError(code=FailureCode.INVALID_COMMAND, message_key="failure.invalid_command")

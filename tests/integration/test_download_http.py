@@ -143,9 +143,12 @@ async def test_sign_and_range_stream(tmp_path: Path) -> None:
                 assert resp.status == 200
                 assert await resp.read() == b""
 
-            # Bad signature → generic 404
+            # Bad signature → generic 404 (mutate multiple chars; avoid cache reuse)
             bad = dict(qs)
-            bad["sig"] = bad["sig"][:-1] + ("A" if bad["sig"][-1] != "A" else "B")
+            sig = bad["sig"]
+            # Invert several base64url characters so HMAC cannot coincidentally match.
+            flipped = "".join("A" if ch != "A" else "B" for ch in sig)
+            bad["sig"] = flipped
             async with session.get(url, params=bad) as resp:
                 assert resp.status == 404
                 assert b"not_found" in await resp.read()

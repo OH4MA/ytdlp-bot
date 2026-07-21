@@ -70,7 +70,9 @@ async def test_signed_link_includes_url_in_final_view(tmp_path: Path) -> None:
     assert result.plan.value == "signed_link"
     finals = [c for c in platform.calls if c[0] == "send_final"]
     assert finals
-    view = finals[-1][1][1]
+    final_call = finals[-1]
+    assert isinstance(final_call, tuple)
+    view = final_call[1][1]  # type: ignore[index]
     assert isinstance(view, FinalOutcomeView)
     assert view.download_url is not None
     assert view.download_url.startswith("https://dl.example.invalid/v1/artifacts/")
@@ -124,7 +126,9 @@ async def test_direct_upload_resolves_local_path(tmp_path: Path) -> None:
     assert result.plan.value == "direct_upload"
     uploads = [c for c in platform.calls if c[0] == "upload_artifact"]
     assert uploads
-    desc = uploads[-1][1][1]
+    upload_call = uploads[-1]
+    assert isinstance(upload_call, tuple)
+    desc = upload_call[1][1]  # type: ignore[index]
     assert desc.local_path is not None
     assert Path(desc.local_path).is_file()
     assert desc.storage_key == key

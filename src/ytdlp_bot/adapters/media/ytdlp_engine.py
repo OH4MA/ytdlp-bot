@@ -4,10 +4,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from ytdlp_bot.domain.enums import MediaMode
-from ytdlp_bot.domain.format_policy import FormatSelection, build_format_selection
+from ytdlp_bot.domain.format_policy import (
+    FormatSelection,
+    build_format_selection,
+    sanitize_format_metadata,
+)
+
+# Options that must never appear from user input.
+_FORBIDDEN_OPTION_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "cookiefile",
+        "cookiesfrombrowser",
+        "username",
+        "password",
+        "netrc",
+        "netrc_location",
+        "config_locations",
+        "plugin_dirs",
+        "external_downloader",
+        "external_downloader_args",
+        "downloader",
+        "update",
+        "update_to",
+        "js_runtimes",
+        "remote_components",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +40,11 @@ class YtdlpOptions:
     """Trusted options dict for yt-dlp Python API."""
 
     raw: dict[str, Any]
+
+    def assert_allowlisted(self) -> None:
+        for key in self.raw:
+            if key in _FORBIDDEN_OPTION_KEYS:
+                raise ValueError(f"forbidden yt-dlp option: {key}")
 
 
 def build_ytdlp_options(
@@ -25,16 +55,37 @@ def build_ytdlp_options(
     network_attempts: int,
     outtmpl: str,
 ) -> YtdlpOptions:
+    """Build a locked-down yt-dlp option dictionary."""
+    attempts = max(1, min(int(network_attempts), 3))
     opts: dict[str, Any] = {
         "format": selection.format_string,
         "outtmpl": outtmpl,
         "noplaylist": selection.mode is MediaMode.VIDEO,
         "quiet": True,
         "no_warnings": True,
-        "retries": network_attempts,
-        "fragment_retries": network_attempts,
+        "retries": attempts,
+        "fragment_retries": attempts,
         "concurrent_fragment_downloads": 1,
         "paths": {"home": workspace},
+        # Security lockdowns
+        "no_color": True,
+        "ignoreconfig": True,
+        "cachedir": False,
+        "geo_bypass": False,
+        "prefer_insecure": False,
+        "check_formats": False,
+        "overwrites": True,
+        "noprogress": True,
+        "simulate": False,
+        "skip_download": False,
+        "writeinfojson": False,
+        "writethumbnail": False,
+        "writesubtitles": False,
+        "writeautomaticsub": False,
+        " syn_playlist": False,
+        "extract_flat": False,
+        "forceprint": {},
+        "print_to_file": {},
     }
     if selection.merge_output_format:
         opts["merge_output_format"] = selection.merge_output_format
@@ -43,7 +94,9 @@ def build_ytdlp_options(
     if proxy_url:
         opts["proxy"] = proxy_url
     # Never pass arbitrary user flags.
-    return YtdlpOptions(raw=opts)
+    result = YtdlpOptions(raw=opts)
+    result.assert_allowlisted()
+    return result
 
 
 def options_for_request(
@@ -72,6 +125,75 @@ def options_for_request(
     )
 
 
+def inspect_metadata_fixture(info: dict[str, Any]) -> dict[str, Any]:
+    """Sanitize yt-dlp info dict into bounded safe metadata (no download)."""
+    formats_raw = info.get("formats") or []
+    formats = []
+    if isinstance(formats_raw, list):
+        for item in formats_raw[:200]:
+            if isinstance(item, dict):
+                formats.append(sanitize_format_metadata(item))
+    title = str(info.get("title") or "")[:200]
+    is_playlist = bool(info.get("entries")) or str(info.get("_type") or "") == "playlist"
+    entry_count = None
+    if is_playlist and isinstance(info.get("entries"), list):
+        entry_count = min(len(info["entries"]), 10_000)
+    return {
+        "title": title,
+        "is_playlist": is_playlist,
+        "entry_count": entry_count,
+        "formats": formats,
+        "extractor": str(info.get("extractor") or info.get("ie_key") or "")[:64],
+    }
+
+
+def progress_hook_to_event(status: dict[str, Any], *, sequence: int) -> dict[str, Any]:
+    """Translate yt-dlp progress hook dict into bounded event payload."""
+    downloaded = status.get("downloaded_bytes")
+    total = status.get("total_bytes") or status.get("total_bytes_estimate")
+    speed = status.get("speed")
+    eta = status.get("eta")
+
+    def _int(v: object) -> int | None:
+        if v is None:
+            return None
+        try:
+            n = int(float(v))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+        if n < 0 or n > 2**63 - 1:
+            return None
+        return n
+
+    return {
+        "type": "progress_changed",
+        "sequence": sequence,
+        "payload": {
+            "downloaded_bytes": _int(downloaded),
+            "total_bytes": _int(total),
+            "speed": _int(speed),
+            "eta": _int(eta),
+            "status": str(status.get("status") or "")[:32],
+        },
+    }
+
+
+def classify_ytdlp_error(message: str) -> str:
+    """Map extractor/network errors to stable codes (no raw message leakage)."""
+    lower = message.lower()
+    if "sign in" in lower or "login" in lower or "authentication" in lower:
+        return "AUTH_REQUIRED"
+    if "drm" in lower or "protected" in lower:
+        return "DRM_PROTECTED"
+    if "unsupported url" in lower or "no suitable" in lower:
+        return "UNSUPPORTED_SOURCE"
+    if "private" in lower or "unavailable" in lower:
+        return "SOURCE_UNAVAILABLE"
+    if "network" in lower or "timeout" in lower or "connection" in lower:
+        return "NETWORK_ERROR"
+    return "EXTRACTOR_ERROR"
+
+
 def run_ytdlp_download(
     source_url: str,
     options: YtdlpOptions,
@@ -81,6 +203,7 @@ def run_ytdlp_download(
     """Invoke pinned yt-dlp Python API; return primary output path."""
     from yt_dlp import YoutubeDL  # type: ignore[import-untyped]
 
+    options.assert_allowlisted()
     workspace.mkdir(parents=True, exist_ok=True)
     before = {p.resolve() for p in workspace.rglob("*") if p.is_file()}
     opts = dict(options.raw)
@@ -98,4 +221,9 @@ def run_ytdlp_download(
     if not after:
         raise RuntimeError("yt-dlp produced no output file")
     after.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    # Containment: reject anything outside workspace.
+    root = workspace.resolve()
+    primary = after[0].resolve()
+    if root not in primary.parents and primary != root:
+        raise RuntimeError("yt-dlp output escaped workspace")
     return after[0]

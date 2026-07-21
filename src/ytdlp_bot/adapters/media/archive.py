@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import re
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from ytdlp_bot.domain.jobs import archive_name_padding
+
+_TRUSTED_EXTENSIONS = frozenset({"mp4", "mp3", "zip"})
+_MAX_TITLE_UTF8 = 180
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,13 +21,34 @@ class ArchiveEntry:
     extension: str
 
 
+def sanitize_filename_title(title: str) -> str:
+    """Unicode-safe title for ZIP member names (no path separators)."""
+    # Normalize separators and control characters.
+    cleaned = title.replace("\x00", "").replace("/", "_").replace("\\", "_")
+    cleaned = re.sub(r"[\r\n\t]+", " ", cleaned)
+    cleaned = "".join(ch if ch.isprintable() else "_" for ch in cleaned)
+    cleaned = re.sub(r"[<>:\"|?*]+", "_", cleaned)
+    cleaned = cleaned.strip(" .")
+    if not cleaned:
+        cleaned = "entry"
+    # Bound by UTF-8 bytes then characters.
+    encoded = cleaned.encode("utf-8")
+    if len(encoded) > _MAX_TITLE_UTF8:
+        cleaned = encoded[:_MAX_TITLE_UTF8].decode("utf-8", errors="ignore").rstrip()
+    return cleaned[:80] or "entry"
+
+
+def trusted_extension(extension: str) -> str:
+    ext = extension.lstrip(".").lower()
+    if ext not in _TRUSTED_EXTENSIONS:
+        return "bin"
+    return ext
+
+
 def build_archive_member_name(index: int, *, total: int | None, title: str, extension: str) -> str:
     width = archive_name_padding(total)
-    safe = "".join(ch if ch.isalnum() or ch in "._- " else "_" for ch in title).strip()
-    if not safe:
-        safe = "entry"
-    safe = safe[:80]
-    ext = extension.lstrip(".")
+    safe = sanitize_filename_title(title)
+    ext = trusted_extension(extension)
     return f"{index:0{width}d}_{safe}.{ext}"
 
 

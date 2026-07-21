@@ -53,6 +53,21 @@ docker compose up -d
 - 日誌不得出現 bot token、簽章密鑰、完整 bearer URL 或敏感來源 URL 元件。
 - 應用程式以非 root、唯讀根檔案系統期望執行。
 
+## 告警與操作手冊
+
+| 訊號 | 意義 | 操作 |
+| --- | --- | --- |
+| `/readyz` 未就緒 | 拒絕接單 | 檢查 recovery/egress/storage 日誌與設定 |
+| 容量拒絕增加 | 儲存逼近上限 | 以管理員確認調高 `capacity_bytes` 或清出磁碟 |
+| cleanup 錯誤 | 刪除重試卡住 | 檢查檔案權限與 artifact lease |
+| worker 啟動失敗 | 媒體管線異常 | 確認映像內 FFmpeg/yt-dlp；CI 才使用 fixture mode |
+
+備份：停止寫入後複製 `state/` 下 SQLite 與 WAL/SHM，以及 `data/artifacts/`。還原至空 volume 後再啟動。
+
+升級：拉取映像、`docker compose up -d`、確認 `/readyz`、執行受控即時煙霧測試。
+
 ## 即時煙霧測試（手動）
 
 需真實憑證（不納入例行 CI）：於兩平台送出 `/ytdl`、`/ytmp3`，驗證進度、取消、狀態、上限內上傳、上限外簽章連結與重啟對帳。
+
+發行驗收追蹤將 AC01–AC18 對應至 `doc/tasks/progress.md` 與 `.github/workflows/ci.yml`。
