@@ -21,6 +21,7 @@ from ytdlp_bot.adapters.persistence.sqlite.connection import InstanceLock, open_
 from ytdlp_bot.adapters.persistence.sqlite.migrate import apply_migrations
 from ytdlp_bot.adapters.persistence.sqlite.repositories import (
     SqliteAccessRepository,
+    SqliteAdminConfirmationRepository,
     SqliteArtifactRepository,
     SqliteJobPayloadRepository,
     SqliteJobRepository,
@@ -103,49 +104,6 @@ class WallClock:
         return time.monotonic()
 
 
-class _InMemoryConfirmations:
-    """Minimal confirmation store for composition until SQLite ADM repo is used."""
-
-    def __init__(self) -> None:
-        self._items: dict[str, dict[str, object]] = {}
-
-    async def create(
-        self,
-        confirmation_id: str,
-        *,
-        action_fingerprint: str,
-        owner: object,
-        expires_at: datetime,
-        projected_snapshot: str,
-    ) -> None:
-        self._items[confirmation_id] = {
-            "fp": action_fingerprint,
-            "owner": owner,
-            "exp": expires_at,
-            "snap": projected_snapshot,
-            "used": False,
-        }
-
-    async def consume_if_matching(
-        self,
-        confirmation_id: str,
-        *,
-        action_fingerprint: str,
-        owner: object,
-        now: datetime,
-        projected_snapshot: str,
-    ) -> bool:
-        item = self._items.get(confirmation_id)
-        if item is None or item["used"]:
-            return False
-        if item["fp"] != action_fingerprint or item["owner"] != owner:
-            return False
-        if item["snap"] != projected_snapshot or item["exp"] < now:  # type: ignore[operator]
-            return False
-        item["used"] = True
-        return True
-
-
 @dataclass
 class AppRuntime:
     config: EffectiveConfig
@@ -226,6 +184,7 @@ async def bootstrap(
         },
     )
     access_repo = SqliteAccessRepository(conn, config.access.mode)
+    confirmations = SqliteAdminConfirmationRepository(conn)
 
     dns = SystemDnsResolver(timeout_seconds=config.network.dns_timeout_seconds)
     preflight = AiohttpPreflightClient(
@@ -284,8 +243,11 @@ async def bootstrap(
         auth=auth,
         settings=settings,
         access=access_repo,
-        confirmations=_InMemoryConfirmations(),
+        confirmations=confirmations,
         id_confirmation=ids,
+        jobs=jobs,
+        artifacts=arts,
+        files=store,
     )
     command_service = CommandService(jobs=job_service, admin=admin, admission_open=True)
 

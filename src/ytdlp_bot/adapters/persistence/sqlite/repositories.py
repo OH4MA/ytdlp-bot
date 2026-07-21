@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from datetime import datetime
@@ -766,3 +767,156 @@ class SqliteCapacityRepository:
         )
         await self._conn.commit()
         return cur.rowcount
+
+
+def _confirmation_digest(confirmation_id: str) -> bytes:
+    """Store only SHA-256 digest of the opaque confirmation ID (never the raw ID)."""
+    return hashlib.sha256(confirmation_id.encode("utf-8")).digest()
+
+
+class SqliteAdminConfirmationRepository:
+    """Durable one-time capacity confirmation store (ADM-07/08)."""
+
+    def __init__(self, conn: aiosqlite.Connection) -> None:
+        self._conn = conn
+
+    async def _service_revisions(self) -> tuple[int, int]:
+        cur = await self._conn.execute(
+            """
+            SELECT settings_revision, storage_epoch
+            FROM service_state WHERE singleton = 1
+            """
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return 0, 0
+        return int(row[0]), int(row[1])
+
+    async def create(
+        self,
+        confirmation_id: str,
+        *,
+        action_fingerprint: str,
+        owner: Identity,
+        expires_at: datetime,
+        projected_snapshot: str,
+        action: str = "capacity_set",
+        projected_count: int = 0,
+        projected_bytes: int = 0,
+    ) -> None:
+        if action not in {"capacity_set", "capacity_reset"}:
+            action = "capacity_set"
+        digest = _confirmation_digest(confirmation_id)
+        settings_revision, storage_epoch = await self._service_revisions()
+        payload = {
+            "fingerprint": action_fingerprint,
+            "snapshot": projected_snapshot,
+        }
+        exp_ms = dt_to_ms(expires_at) or 0
+        # Port has no separate "now"; assume default 60s TTL for created_at ordering.
+        created_ms = max(0, exp_ms - 60_000)
+        await self._conn.execute(
+            """
+            INSERT INTO admin_confirmations (
+              confirmation_digest, admin_platform, admin_user_id, action,
+              payload_json, settings_revision, storage_epoch,
+              projected_count, projected_bytes, expires_at, consumed_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            """,
+            (
+                digest,
+                owner.platform.value,
+                owner.user_id,
+                action,
+                json.dumps(payload, separators=(",", ":")),
+                settings_revision,
+                storage_epoch,
+                projected_count,
+                projected_bytes,
+                exp_ms,
+                created_ms,
+            ),
+        )
+        await self._conn.commit()
+
+    async def consume_if_matching(
+        self,
+        confirmation_id: str,
+        *,
+        action_fingerprint: str,
+        owner: Identity,
+        now: datetime,
+        projected_snapshot: str,
+    ) -> bool:
+        digest = _confirmation_digest(confirmation_id)
+        now_ms = dt_to_ms(now) or 0
+        cur = await self._conn.execute(
+            """
+            SELECT admin_platform, admin_user_id, payload_json, expires_at, consumed_at,
+                   settings_revision, storage_epoch
+            FROM admin_confirmations
+            WHERE confirmation_digest = ?
+            """,
+            (digest,),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return False
+        if row["consumed_at"] is not None:
+            return False
+        if int(row["expires_at"]) < now_ms:
+            return False
+        if (
+            str(row["admin_platform"]) != owner.platform.value
+            or str(row["admin_user_id"]) != owner.user_id
+        ):
+            return False
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        if payload.get("fingerprint") != action_fingerprint:
+            return False
+        if payload.get("snapshot") != projected_snapshot:
+            return False
+        # Invalidate when settings/storage epoch moved since create.
+        settings_revision, storage_epoch = await self._service_revisions()
+        if int(row["settings_revision"]) != settings_revision:
+            return False
+        if int(row["storage_epoch"]) != storage_epoch:
+            return False
+        # Atomic one-time consume: only if still unconsumed.
+        cur = await self._conn.execute(
+            """
+            UPDATE admin_confirmations
+            SET consumed_at = ?
+            WHERE confirmation_digest = ? AND consumed_at IS NULL
+            """,
+            (now_ms, digest),
+        )
+        await self._conn.commit()
+        return cur.rowcount == 1
+
+    async def purge_expired(self, *, now: datetime) -> int:
+        now_ms = dt_to_ms(now) or 0
+        cur = await self._conn.execute(
+            """
+            DELETE FROM admin_confirmations
+            WHERE expires_at < ? OR (consumed_at IS NOT NULL AND consumed_at < ?)
+            """,
+            (now_ms, now_ms),
+        )
+        await self._conn.commit()
+        return int(cur.rowcount)
+
+    async def raw_row_count(self) -> int:
+        cur = await self._conn.execute("SELECT COUNT(*) FROM admin_confirmations")
+        row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+    async def digests(self) -> list[bytes]:
+        cur = await self._conn.execute("SELECT confirmation_digest FROM admin_confirmations")
+        rows = await cur.fetchall()
+        return [bytes(r[0]) for r in rows]

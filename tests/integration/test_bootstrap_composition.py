@@ -62,5 +62,14 @@ async def test_bootstrap_composes_services(tmp_path: Path) -> None:
         assert runtime.readiness.storage is True
         # egress requires dns + loopback block
         assert runtime.readiness.egress is True
+        # ADM confirmations must be SQLite-backed on the composed path.
+        admin = runtime.command_service.admin
+        assert admin is not None
+        from ytdlp_bot.adapters.persistence.sqlite.repositories import (
+            SqliteAdminConfirmationRepository,
+        )
+
+        assert isinstance(admin.confirmations, SqliteAdminConfirmationRepository)  # type: ignore[attr-defined]
+        assert not type(admin.confirmations).__name__.startswith("_InMemory")
     finally:
         await shutdown_runtime(runtime)
