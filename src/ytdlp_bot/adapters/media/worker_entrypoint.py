@@ -8,6 +8,7 @@ import sys
 import traceback
 from pathlib import Path
 
+from ytdlp_bot.adapters.media.archive import build_artifact_display_name
 from ytdlp_bot.adapters.media.ffmpeg_engine import ensure_local_input, probe_media
 from ytdlp_bot.adapters.media.worker_protocol import WorkerRequestMessage, parse_ndjson_line
 from ytdlp_bot.adapters.media.ytdlp_engine import options_for_request, run_ytdlp_download
@@ -81,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
                 media_type = "video/mp4"
                 name = "video.mp4"
         else:
-            out = run_ytdlp_download(req.source_url, opts, workspace=workspace)
+            out, media_title = run_ytdlp_download(req.source_url, opts, workspace=workspace)
             emit("phase_changed", phase=WorkerPhase.POST_PROCESSING.value)
             local = ensure_local_input(str(out), workspace_root=str(workspace))
             probe = probe_media(local)
@@ -93,7 +94,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 1
             media_type = "audio/mpeg" if mode is MediaMode.AUDIO else "video/mp4"
-            name = out.name
+            ext = out.suffix.lstrip(".") or ("mp3" if mode is MediaMode.AUDIO else "mp4")
+            # Prefer original title; fallback to on-disk name (title-based outtmpl).
+            name = (
+                build_artifact_display_name(media_title, ext) if media_title else out.name
+            )
 
         emit("phase_changed", phase=WorkerPhase.POST_PROCESSING.value)
         emit(

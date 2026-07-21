@@ -9,6 +9,7 @@ import pytest
 from ytdlp_bot.adapters.media.archive import (
     ArchiveEntry,
     build_archive_member_name,
+    build_artifact_display_name,
     sanitize_filename_title,
     trusted_extension,
     write_playlist_zip,
@@ -27,6 +28,16 @@ def test_sanitize_and_unique_archive_names(tmp_path: Path) -> None:
     assert name.endswith(".mp4")
     assert "你好" in name
     assert "/" not in name
+    display = build_artifact_display_name("原影片名稱 / 測試:標題", "mp4")
+    assert display.endswith(".mp4")
+    assert "原影片名稱" in display
+    assert "/" not in display
+    assert ":" not in display
+    assert len(display) <= 200
+    long_title = "あ" * 300
+    long_name = build_artifact_display_name(long_title, "mp3")
+    assert long_name.endswith(".mp3")
+    assert len(long_name) <= 200
     f = tmp_path / "a.mp4"
     f.write_bytes(b"x")
     out = tmp_path / "pl.zip"

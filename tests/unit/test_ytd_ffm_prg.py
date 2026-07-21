@@ -138,6 +138,7 @@ def test_ytdlp_options_lockdown() -> None:
         network_attempts=1,
     )
     assert o2.raw["postprocessors"]
+    assert "%(title)" in str(o2.raw["outtmpl"])
     assert classify_ytdlp_error("Sign in to confirm") == "AUTH_REQUIRED"
     assert classify_ytdlp_error("network timeout") == "NETWORK_ERROR"
     meta = inspect_metadata_fixture(

@@ -21,8 +21,8 @@ class ArchiveEntry:
     extension: str
 
 
-def sanitize_filename_title(title: str) -> str:
-    """Unicode-safe title for ZIP member names (no path separators)."""
+def sanitize_filename_title(title: str, *, max_chars: int = 80) -> str:
+    """Unicode-safe title for archive members / artifact display names."""
     # Normalize separators and control characters.
     cleaned = title.replace("\x00", "").replace("/", "_").replace("\\", "_")
     cleaned = re.sub(r"[\r\n\t]+", " ", cleaned)
@@ -35,7 +35,8 @@ def sanitize_filename_title(title: str) -> str:
     encoded = cleaned.encode("utf-8")
     if len(encoded) > _MAX_TITLE_UTF8:
         cleaned = encoded[:_MAX_TITLE_UTF8].decode("utf-8", errors="ignore").rstrip()
-    return cleaned[:80] or "entry"
+    limit = max(1, min(int(max_chars), 200))
+    return cleaned[:limit] or "entry"
 
 
 def trusted_extension(extension: str) -> str:
@@ -43,6 +44,18 @@ def trusted_extension(extension: str) -> str:
     if ext not in _TRUSTED_EXTENSIONS:
         return "bin"
     return ext
+
+
+def build_artifact_display_name(title: str, extension: str) -> str:
+    """User-facing download/upload filename from original media title."""
+    base = sanitize_filename_title(title, max_chars=180)
+    ext = trusted_extension(extension)
+    name = f"{base}.{ext}"
+    if len(name) > 200:
+        # Keep extension; trim base so the full name fits domain max (200).
+        keep = max(1, 200 - len(ext) - 1)
+        name = f"{base[:keep]}.{ext}"
+    return name
 
 
 def build_archive_member_name(index: int, *, total: int | None, title: str, extension: str) -> str:

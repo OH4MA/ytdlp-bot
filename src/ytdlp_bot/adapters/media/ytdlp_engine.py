@@ -115,7 +115,9 @@ def options_for_request(
         quality=quality if isinstance(quality, VideoQuality) else None,
         bitrate=bitrate if isinstance(bitrate, AudioBitrate) else None,
     )
-    tmpl = str(Path(workspace) / "%(id)s.%(ext)s")
+    # Prefer original title for the workspace filename; display_name is also
+    # derived from metadata after download for Telegram / signed URLs.
+    tmpl = str(Path(workspace) / "%(title).180B.%(ext)s")
     return build_ytdlp_options(
         sel,
         workspace=workspace,
@@ -199,8 +201,8 @@ def run_ytdlp_download(
     options: YtdlpOptions,
     *,
     workspace: Path,
-) -> Path:
-    """Invoke pinned yt-dlp Python API; return primary output path."""
+) -> tuple[Path, str]:
+    """Invoke pinned yt-dlp Python API; return (primary path, original title)."""
     from yt_dlp import YoutubeDL  # type: ignore[import-untyped]
 
     options.assert_allowlisted()
@@ -208,8 +210,9 @@ def run_ytdlp_download(
     before = {p.resolve() for p in workspace.rglob("*") if p.is_file()}
     opts = dict(options.raw)
     opts["paths"] = {"home": str(workspace)}
+    extracted: object | None = None
     with YoutubeDL(opts) as ydl:
-        ydl.download([source_url])
+        extracted = ydl.extract_info(source_url, download=True)
     after = [p for p in workspace.rglob("*") if p.is_file() and p.resolve() not in before]
     if not after:
         # Fallback: any media-like file in workspace.
@@ -226,4 +229,13 @@ def run_ytdlp_download(
     primary = after[0].resolve()
     if root not in primary.parents and primary != root:
         raise RuntimeError("yt-dlp output escaped workspace")
-    return after[0]
+    title = ""
+    if isinstance(extracted, dict):
+        title = str(extracted.get("title") or extracted.get("fulltitle") or "").strip()
+        # Single-entry playlist wrappers occasionally nest the real entry.
+        entries = extracted.get("entries")
+        if not title and isinstance(entries, list) and entries:
+            first = entries[0]
+            if isinstance(first, dict):
+                title = str(first.get("title") or first.get("fulltitle") or "").strip()
+    return after[0], title
