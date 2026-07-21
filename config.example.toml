@@ -1,0 +1,74 @@
+# Example static configuration for yt-dlp Bot.
+# capacity_bytes is required and must be chosen for the host (value below is illustrative).
+
+[app]
+default_locale = "zh-TW"
+worker_concurrency = 2
+progress_interval_seconds = 5
+cancellation_grace_seconds = 10
+cleanup_interval_seconds = 300
+graceful_shutdown_seconds = 30
+recent_jobs_limit = 10
+terminal_tombstone_seconds = 3600
+
+[platforms.telegram]
+enabled = true
+token_ref = "file:/run/secrets/telegram_bot_token"
+direct_upload_limit_bytes = 50000000
+
+[platforms.discord]
+enabled = true
+token_ref = "file:/run/secrets/discord_bot_token"
+fallback_upload_limit_bytes = 10485760
+
+[storage]
+artifact_root = "/var/lib/ytdlp-bot/artifacts"
+database_path = "/var/lib/ytdlp-bot/state/service.sqlite3"
+capacity_bytes = 107374182400
+safety_headroom_bytes = 1073741824
+unknown_size_initial_reservation_bytes = 268435456
+reservation_growth_bytes = 268435456
+
+[artifacts]
+retention_seconds = 43200
+link_expiry_seconds = 3600
+public_base_url = "https://downloads.example.invalid"
+signing_secret_ref = "file:/run/secrets/url_signing_secret"
+
+[http]
+bind_host = "0.0.0.0"
+bind_port = 8080
+max_concurrent_streams = 8
+stream_chunk_bytes = 1048576
+stream_idle_timeout_seconds = 60
+trusted_proxy_networks = ["172.30.0.0/24"]
+
+[network]
+outbound_proxy_ref = "env:YTDLP_BOT_OUTBOUND_PROXY"
+allowed_destination_ports = [80, 443]
+max_redirects = 10
+dns_timeout_seconds = 5
+request_timeout_seconds = 30
+blocked_cidrs = []
+
+[media]
+video_qualities = ["best", "2160p", "1440p", "1080p", "720p", "480p", "360p"]
+audio_bitrates = ["128k", "192k", "256k", "320k"]
+default_video_quality = "best"
+default_audio_bitrate = "320k"
+network_attempts = 3
+worker_heartbeat_seconds = 15
+worker_stall_timeout_seconds = 90
+
+[access]
+initial_mode = "allow_all"
+administrators = [
+  "telegram:123456789",
+  "discord:123456789012345678",
+]
+initial_whitelist = []
+
+[logging]
+level = "INFO"
+format = "json"
+recommended_retention_days = 14
