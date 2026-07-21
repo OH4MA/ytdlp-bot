@@ -4,6 +4,21 @@
 # https://ytdl.oh4ma.net is expected in front of host port 62080.
 
 services:
+  # Named volumes are root-owned on first create; app runs as uid 10001.
+  volume-init:
+    image: alpine:3.20
+    user: "0:0"
+    volumes:
+      - bot-state:/var/lib/ytdlp-bot/state
+      - bot-artifacts:/var/lib/ytdlp-bot/artifacts
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /var/lib/ytdlp-bot/state /var/lib/ytdlp-bot/artifacts
+        chown -R 10001:10001 /var/lib/ytdlp-bot/state /var/lib/ytdlp-bot/artifacts
+    restart: "no"
+
   ytdlp-bot:
     build: .
     user: "10001:10001"
@@ -18,6 +33,9 @@ services:
     # Matches config [http] bind_port = 62080
     ports:
       - "62080:62080"
+    depends_on:
+      volume-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     # outbound_proxy_ref is disabled in config.toml; do not set YTDLP_BOT_OUTBOUND_PROXY.
     # Optional: pin a Docker network whose CIDR matches [http] trusted_proxy_networks
