@@ -47,6 +47,12 @@ class PayloadPort(Protocol):
     async def delete(self, job_id: JobId) -> None: ...
 
 
+class CapacityEnsure(Protocol):
+    async def ensure_capacity(
+        self, *, needed_bytes: int, now: datetime, workspace_bytes: int = 0
+    ) -> bool: ...
+
+
 @dataclass
 class PublishService:
     """CAP-09/10: capacity lock then publish file then DB row."""
@@ -58,6 +64,7 @@ class PublishService:
     payloads: PayloadPort
     ids: IdGenerator
     retention_seconds: int
+    eviction: CapacityEnsure | None = None
     _lock: asyncio.Lock | None = None
 
     def __post_init__(self) -> None:
@@ -76,6 +83,15 @@ class PublishService:
         assert self._lock is not None
         async with self._lock:
             size = Path(source_path).stat().st_size
+            if self.eviction is not None:
+                reservation_for = getattr(self.capacity, "reservation_for", None)
+                current = 0
+                if callable(reservation_for):
+                    raw = reservation_for(job.job_id)
+                    current = raw if isinstance(raw, int) else 0
+                need = max(0, size - current)
+                if need > 0:
+                    await self.eviction.ensure_capacity(needed_bytes=need, now=now)
             await self.capacity.grow(job.job_id, required_total=size)
             key = self.ids.storage_key()
             await self.store.atomically_publish(source_path, key)

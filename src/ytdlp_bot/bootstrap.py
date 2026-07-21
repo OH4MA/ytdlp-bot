@@ -40,6 +40,7 @@ from ytdlp_bot.application.artifact_access import (
     InMemoryArtifactLeaseRegistry,
 )
 from ytdlp_bot.application.authorization import AuthorizationService
+from ytdlp_bot.application.capacity_eviction import CapacityEvictionService
 from ytdlp_bot.application.cleanup import CleanupService
 from ytdlp_bot.application.command_service import CommandService
 from ytdlp_bot.application.delivery import DeliveryService
@@ -56,7 +57,9 @@ from ytdlp_bot.domain.enums import (
     Platform,
     VideoQuality,
 )
+from ytdlp_bot.domain.errors import DomainError
 from ytdlp_bot.domain.jobs import Job
+from ytdlp_bot.domain.progress import FinalOutcomeView
 from ytdlp_bot.ports.media import WorkerEvent, WorkerRequest
 
 log = logging.getLogger("ytdlp_bot.bootstrap")
@@ -274,6 +277,14 @@ async def bootstrap(
         unknown_size_initial_reservation_bytes=config.storage.unknown_size_initial_reservation_bytes,
         reservation_growth_bytes=config.storage.reservation_growth_bytes,
     )
+    leases = InMemoryArtifactLeaseRegistry()
+    capacity_eviction = CapacityEvictionService(
+        capacity=capacity,
+        artifacts=arts,
+        files=store,
+        jobs=jobs,
+        leases=leases,
+    )
     delivery = DeliveryService(
         platform=platform_port,
         link_issuer=DownloadLinkIssuer(signer),
@@ -294,6 +305,7 @@ async def bootstrap(
         payloads=payloads,
         ids=ids,
         retention_seconds=config.artifacts.retention_seconds,
+        eviction=capacity_eviction,
     )
     orchestrator = Orchestrator(
         jobs=jobs,
@@ -326,12 +338,46 @@ async def bootstrap(
                 "source_display": job.source_display,
             },
         )
-        # Reserve capacity before spawning work.
-        await capacity.reserve(
-            job.job_id,
-            known_size=None,
-            now=clock.now(),
+        # Reserve capacity before spawning work; reclaim oldest artifacts if needed.
+        now = clock.now()
+        await capacity_eviction.ensure_capacity(
+            needed_bytes=capacity.unknown_size_initial,
+            now=now,
         )
+        try:
+            await capacity.reserve(
+                job.job_id,
+                known_size=None,
+                now=now,
+            )
+        except DomainError as exc:
+            log.warning(
+                "launch capacity denied",
+                extra={
+                    "event": "job.launch_capacity_denied",
+                    "job_id": job.job_id.value,
+                    "error_code": exc.code.value,
+                },
+            )
+            await payloads.delete(job.job_id)
+            current = await jobs.get(job.job_id) or job
+            await jobs.transition(
+                job.job_id,
+                expected_version=current.version,
+                new_state=JobState.FAILED,
+                error_code=exc.code,
+            )
+            if current.message_reference is not None:
+                await platform_port.send_final(
+                    current.message_reference,
+                    FinalOutcomeView(
+                        job_id=job.job_id,
+                        outcome="failed",
+                        message_key="outcome.failed",
+                        error_code=exc.code,
+                    ),
+                )
+            return
         ws = await store.create_job_workspace(job.job_id)
         quality = None
         bitrate = None
@@ -378,9 +424,14 @@ async def bootstrap(
         now_fn=clock.now,
     )
 
-    cleanup = CleanupService(jobs=jobs, artifacts=arts, files=store, payloads=payloads)
+    cleanup = CleanupService(
+        jobs=jobs,
+        artifacts=arts,
+        files=store,
+        payloads=payloads,
+        capacity=capacity_eviction,
+    )
 
-    leases = InMemoryArtifactLeaseRegistry()
     access = ArtifactAccessCoordinator(arts, leases)
     downloads = DownloadService(
         artifacts=arts,

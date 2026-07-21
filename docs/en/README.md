@@ -31,6 +31,7 @@ Copy `config.example.toml` to a secure path (not world-readable). Resolve secret
 Required highlights:
 
 - `storage.capacity_bytes` — operator selected (example value is illustrative)
+- Under capacity pressure, expired artifacts are removed first, then oldest non-expired by `ready_at`, skipping active HTTP stream / platform upload leases; only then is a new reservation denied
 - `artifacts.public_base_url` — HTTPS, no query/fragment/trailing slash
 - `artifacts.signing_secret_ref` — ≥ 32 bytes entropy
 - At least one platform enabled with a token secret
@@ -58,7 +59,7 @@ Health: private `/healthz` (liveness) and `/readyz` (readiness). Public download
 | Signal | Meaning | Operator action |
 | --- | --- | --- |
 | `/readyz` not ready | Admission closed | Inspect logs for recovery/egress/storage; fix config or disk |
-| Capacity denials rising | Storage near limit | Raise `capacity_bytes` with admin confirmation, or free disk |
+| Capacity denials rising | Near limit with nothing reclaimable (or all candidates leased) | Raise `capacity_bytes`, free disk, or wait for active downloads to finish |
 | Cleanup last_error set | Deletion retry stuck | Check filesystem permissions and artifact leases |
 | Worker spawn failures | Media pipeline unhealthy | Verify FFmpeg/yt-dlp in image; enable fixture mode only for CI |
 

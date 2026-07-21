@@ -134,3 +134,6 @@ class CapacityManager:
 
     def reservation_total(self) -> int:
         return sum(self._reservations.values())
+
+    def reservation_for(self, job_id: JobId) -> int:
+        return self._reservations.get(job_id.value, 0)

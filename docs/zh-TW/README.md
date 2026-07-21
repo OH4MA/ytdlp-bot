@@ -31,6 +31,7 @@ uv run pytest
 重點：
 
 - `storage.capacity_bytes` — 必須由營運者設定（範例值僅供示意）
+- 容量不足時會先清除過期成品，再依 `ready_at` 最舊優先回收未在 HTTP 串流／平台上傳中的成品；仍不足才拒絕新預約
 - `artifacts.public_base_url` — HTTPS，不可含 query/fragment/結尾斜線
 - `artifacts.signing_secret_ref` — 至少 32 位元組熵
 - 至少啟用一個平台並提供 token
@@ -58,7 +59,7 @@ docker compose up -d
 | 訊號 | 意義 | 操作 |
 | --- | --- | --- |
 | `/readyz` 未就緒 | 拒絕接單 | 檢查 recovery/egress/storage 日誌與設定 |
-| 容量拒絕增加 | 儲存逼近上限 | 以管理員確認調高 `capacity_bytes` 或清出磁碟 |
+| 容量拒絕增加 | 儲存逼近上限且無可回收成品（或皆有 active lease） | 調高 `capacity_bytes`、清磁碟，或等待下載中的連結結束後再試 |
 | cleanup 錯誤 | 刪除重試卡住 | 檢查檔案權限與 artifact lease |
 | worker 啟動失敗 | 媒體管線異常 | 確認映像內 FFmpeg/yt-dlp；CI 才使用 fixture mode |
 
