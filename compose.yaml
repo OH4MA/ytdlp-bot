@@ -1,4 +1,8 @@
-# Single-host Compose topology (illustrative). Secrets via files, not env values.
+# Single-host Compose for this deployment.
+# Aligns with config.toml: Telegram only, HTTP 62080, no outbound proxy sidecar.
+# Secrets via files under ./secrets (not env values). Reverse TLS for
+# https://ytdl.oh4ma.net is expected in front of host port 62080.
+
 services:
   ytdlp-bot:
     build: .
@@ -7,24 +11,17 @@ services:
     tmpfs:
       - /tmp
     volumes:
-      - ./config.example.toml:/config/config.toml:ro
+      - ./config.toml:/config/config.toml:ro
       - bot-state:/var/lib/ytdlp-bot/state
       - bot-artifacts:/var/lib/ytdlp-bot/artifacts
       - ./secrets:/run/secrets:ro
-    environment:
-      YTDLP_BOT_OUTBOUND_PROXY: http://egress-proxy:8888
+    # Matches config [http] bind_port = 62080
     ports:
-      - "8080:8080"
-    depends_on:
-      - egress-proxy
+      - "62080:62080"
     restart: unless-stopped
-
-  egress-proxy:
-    # Placeholder controlled-egress sidecar; replace with production proxy image.
-    image: alpine:3.20
-    command: ["sleep", "infinity"]
-    read_only: true
-    restart: unless-stopped
+    # outbound_proxy_ref is disabled in config.toml; do not set YTDLP_BOT_OUTBOUND_PROXY.
+    # Optional: pin a Docker network whose CIDR matches [http] trusted_proxy_networks
+    # when a reverse proxy sits on the same bridge.
 
 volumes:
   bot-state:
