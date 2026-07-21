@@ -109,7 +109,10 @@ def test_tamper_signature_rejected(signer: HmacTokenSigner) -> None:
 
     parsed = urlparse(link.url)
     qs = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-    qs["sig"] = qs["sig"][:-1] + ("A" if qs["sig"][-1] != "A" else "B")
+    # Flip a middle signature character to force HMAC mismatch.
+    sig = qs["sig"]
+    mid = len(sig) // 2
+    qs["sig"] = sig[:mid] + ("B" if sig[mid] != "B" else "C") + sig[mid + 1 :]
     with pytest.raises(TokenValidationError):
         signer.verify_request(
             artifact_id=AID,

@@ -160,9 +160,7 @@ class HmacTokenSigner:
         # Path context may be injected under reserved keys by verify_request.
         artifact_id = query_params.get("_artifact_id", "")
         display_name = query_params.get("_display_name", "")
-        public_params = {
-            k: v for k, v in query_params.items() if not k.startswith("_")
-        }
+        public_params = {k: v for k, v in query_params.items() if not k.startswith("_")}
 
         if sum(len(k) + len(v) for k, v in public_params.items()) > _MAX_QUERY_LEN:
             raise TokenValidationError("query too long")
