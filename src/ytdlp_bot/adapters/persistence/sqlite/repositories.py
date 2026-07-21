@@ -685,3 +685,84 @@ class SqliteAccessRepository:
         )
         await self._conn.commit()
         return cur.rowcount == 1
+
+
+class SqliteCapacityRepository:
+    def __init__(self, conn: aiosqlite.Connection) -> None:
+        self._conn = conn
+
+    async def reserve(self, job_id: JobId, bytes_: int, *, now: datetime) -> Result[int]:
+        from ytdlp_bot.ports.results import Ok
+
+        await self._conn.execute(
+            """
+            INSERT INTO capacity_reservations(
+              job_id, reserved_bytes, observed_workspace_bytes,
+              controller_instance_id, expires_at, updated_at
+            ) VALUES (?, ?, 0, 'controller', ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+              reserved_bytes = capacity_reservations.reserved_bytes + excluded.reserved_bytes,
+              updated_at = excluded.updated_at
+            """,
+            (job_id.value, bytes_, dt_to_ms(now), dt_to_ms(now)),
+        )
+        await self._conn.execute(
+            """
+            UPDATE service_state
+            SET storage_accounting_revision = storage_accounting_revision + 1,
+                updated_at = ?
+            WHERE singleton = 1
+            """,
+            (dt_to_ms(now),),
+        )
+        await self._conn.commit()
+        total = await self.sum_reservations()
+        return Ok(total)
+
+    async def adjust(self, job_id: JobId, bytes_: int, *, now: datetime) -> Result[int]:
+        from ytdlp_bot.ports.results import Ok
+
+        await self._conn.execute(
+            """
+            UPDATE capacity_reservations
+            SET reserved_bytes = MAX(0, reserved_bytes + ?),
+                updated_at = ?
+            WHERE job_id = ?
+            """,
+            (bytes_, dt_to_ms(now), job_id.value),
+        )
+        await self._conn.commit()
+        cur = await self._conn.execute(
+            "SELECT reserved_bytes FROM capacity_reservations WHERE job_id = ?",
+            (job_id.value,),
+        )
+        row = await cur.fetchone()
+        return Ok(int(row[0]) if row else 0)
+
+    async def heartbeat(self, job_id: JobId, *, now: datetime) -> None:
+        await self._conn.execute(
+            "UPDATE capacity_reservations SET updated_at = ? WHERE job_id = ?",
+            (dt_to_ms(now), job_id.value),
+        )
+        await self._conn.commit()
+
+    async def release(self, job_id: JobId) -> None:
+        await self._conn.execute(
+            "DELETE FROM capacity_reservations WHERE job_id = ?", (job_id.value,)
+        )
+        await self._conn.commit()
+
+    async def sum_reservations(self) -> int:
+        cur = await self._conn.execute(
+            "SELECT COALESCE(SUM(reserved_bytes), 0) FROM capacity_reservations"
+        )
+        row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+    async def clear_stale(self, *, older_than: datetime) -> int:
+        cur = await self._conn.execute(
+            "DELETE FROM capacity_reservations WHERE updated_at < ?",
+            (dt_to_ms(older_than),),
+        )
+        await self._conn.commit()
+        return cur.rowcount
