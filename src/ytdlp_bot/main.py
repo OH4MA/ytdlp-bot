@@ -43,7 +43,21 @@ async def _async_main(config_path: Path, *, fixture_workers: bool) -> int:
             start_background=True,
         )
     except Exception as exc:
-        log.error("startup failed: %s", type(exc).__name__)
+        # ConfigurationError diagnostics are English and secret-free; still bound length.
+        detail = str(exc).strip()
+        if detail:
+            log.error(
+                "startup failed: %s: %s",
+                type(exc).__name__,
+                detail[:300],
+                extra={"event": "startup.failed", "error_code": type(exc).__name__},
+            )
+        else:
+            log.error(
+                "startup failed: %s",
+                type(exc).__name__,
+                extra={"event": "startup.failed", "error_code": type(exc).__name__},
+            )
         return 1
 
     assert runtime.http_app is not None

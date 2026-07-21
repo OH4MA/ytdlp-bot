@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -9,6 +10,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ytdlp_bot.adapters.platform.base import build_text_command_request
+from ytdlp_bot.adapters.platform.command_menu import (
+    command_menu_entries,
+    command_menu_names,
+    telegram_bot_command_dicts,
+)
+from ytdlp_bot.adapters.platform.messages import (
+    render_command_result,
+    render_final,
+    render_job_accepted,
+    render_progress,
+)
 from ytdlp_bot.domain.commands import CommandRequest, CommandResult
 from ytdlp_bot.domain.enums import JobState, Platform, PlatformErrorCode, UploadOutcome
 from ytdlp_bot.domain.identity import JobId, MessageContext, MessageReference
@@ -32,6 +44,33 @@ class TelegramPlatformAdapter:
     _bot: object | None = None
     _dp: object | None = None
     _running: bool = False
+    registered_commands: list[str] = field(default_factory=list)
+
+    def command_menu_snapshot(self) -> list[dict[str, str]]:
+        """Deterministic Telegram BotCommand menu (no Telegram API required)."""
+        return telegram_bot_command_dicts()
+
+    async def register_bot_commands(self, bot: object) -> tuple[str, ...]:
+        """Publish the `/` command menu via setMyCommands."""
+        from aiogram.types import BotCommand, BotCommandScopeDefault, MenuButtonCommands
+
+        entries = command_menu_entries()
+        commands = [BotCommand(command=e.name, description=e.description) for e in entries]
+        await bot.set_my_commands(commands, scope=BotCommandScopeDefault())  # type: ignore[union-attr]
+        # Prefer the native commands button next to the attachment controls when available.
+        with contextlib.suppress(Exception):
+            await bot.set_chat_menu_button(menu_button=MenuButtonCommands())  # type: ignore[union-attr]
+        names = tuple(e.name for e in entries)
+        self.registered_commands = list(names)
+        log.info(
+            "telegram command menu registered",
+            extra={
+                "event": "platform.commands_registered",
+                "platform": "telegram",
+                "command": ",".join(names),
+            },
+        )
+        return names
 
     def normalize_text_update(
         self,
@@ -66,10 +105,10 @@ class TelegramPlatformAdapter:
         self._bot = bot
         self._dp = dp
         handler = self.command_handler
+        menu_names = command_menu_names()
+        await self.register_bot_commands(bot)
 
-        @dp.message(
-            Command("ytdl", "ytmp3", "ytdl_status", "ytdl_cancel", "ytdl_help", "ytdl_admin")
-        )
+        @dp.message(Command(*menu_names))
         async def on_command(message: Message) -> None:
             if message.from_user is None or message.text is None:
                 return
@@ -80,7 +119,38 @@ class TelegramPlatformAdapter:
                 text=message.text,
                 received_at=datetime.now(UTC),
             )
-            result = await handler(req)
+            log.info(
+                "telegram command received",
+                extra={
+                    "event": "platform.command",
+                    "platform": "telegram",
+                    "command": req.command.value,
+                    "request_id": req.request_id,
+                },
+            )
+            try:
+                result = await handler(req)
+            except Exception:
+                log.exception(
+                    "telegram command handler failed",
+                    extra={
+                        "event": "platform.command_error",
+                        "platform": "telegram",
+                        "command": req.command.value,
+                        "request_id": req.request_id,
+                    },
+                )
+                raise
+            log.info(
+                "telegram command result",
+                extra={
+                    "event": "platform.command_result",
+                    "platform": "telegram",
+                    "command": req.command.value,
+                    "kind": result.kind,
+                    "request_id": req.request_id,
+                },
+            )
             await self.send_command_response(
                 MessageContext(
                     platform=Platform.TELEGRAM,
@@ -97,6 +167,9 @@ class TelegramPlatformAdapter:
             return
 
         self._running = True
+        log.info(
+            "telegram polling starting", extra={"event": "platform.start", "platform": "telegram"}
+        )
         await dp.start_polling(bot)
 
     async def stop(self) -> None:
@@ -105,6 +178,7 @@ class TelegramPlatformAdapter:
             await self._dp.stop_polling()  # type: ignore[union-attr]
         if self._bot is not None:
             await self._bot.session.close()  # type: ignore[union-attr]
+        log.info("telegram stopped", extra={"event": "platform.stop", "platform": "telegram"})
 
     async def acknowledge_job(
         self,
@@ -113,7 +187,7 @@ class TelegramPlatformAdapter:
         initial_state: JobState,
     ) -> MessageReference:
         self._msg_seq += 1
-        text = f"accepted job {job_id.value} state={initial_state.value}"
+        text = render_job_accepted(job_id, initial_state)
         if self._bot is not None:
             from aiogram import Bot
 
@@ -130,11 +204,20 @@ class TelegramPlatformAdapter:
                 chat_id=context.chat_id,
                 message_id=str(self._msg_seq),
             )
+        log.info(
+            "telegram job acknowledged",
+            extra={
+                "event": "platform.ack",
+                "platform": "telegram",
+                "job_id": job_id.value,
+                "state": initial_state.value,
+            },
+        )
         self.calls.append(("acknowledge_job", (job_id, initial_state, ref)))
         return ref
 
     async def edit_progress(self, message_reference: MessageReference, view: ProgressView) -> None:
-        text = f"job {view.job_id.value} {view.state} {view.phase or ''} {view.percent or ''}%"
+        text = render_progress(view)
         if self._bot is not None:
             from aiogram import Bot
 
@@ -146,7 +229,15 @@ class TelegramPlatformAdapter:
                     text=text,
                 )
             except Exception as exc:
-                log.debug("edit_progress failed: %s", type(exc).__name__)
+                log.debug(
+                    "edit_progress failed: %s",
+                    type(exc).__name__,
+                    extra={
+                        "event": "platform.edit_progress_failed",
+                        "platform": "telegram",
+                        "job_id": view.job_id.value,
+                    },
+                )
         self.calls.append(("edit_progress", (message_reference, view)))
 
     async def upload_artifact(
@@ -154,6 +245,15 @@ class TelegramPlatformAdapter:
     ) -> UploadOutcome:
         self.calls.append(("upload_artifact", descriptor))
         if descriptor.byte_size > self.upload_limit_bytes:
+            log.info(
+                "telegram upload too large",
+                extra={
+                    "event": "platform.upload_too_large",
+                    "platform": "telegram",
+                    "artifact_id": descriptor.artifact_id,
+                    "byte_size": descriptor.byte_size,
+                },
+            )
             return UploadOutcome.TOO_LARGE
         if self._bot is None:
             return self.upload_outcome
@@ -166,15 +266,41 @@ class TelegramPlatformAdapter:
             return UploadOutcome.FAILED
         path = Path(descriptor.local_path)
         if not path.is_file():
+            log.warning(
+                "telegram upload missing file",
+                extra={
+                    "event": "platform.upload_missing",
+                    "platform": "telegram",
+                    "artifact_id": descriptor.artifact_id,
+                },
+            )
             return UploadOutcome.FAILED
         try:
             await bot.send_document(
                 chat_id=int(context.chat_id),
                 document=FSInputFile(path, filename=descriptor.display_name),
             )
+            log.info(
+                "telegram upload ok",
+                extra={
+                    "event": "platform.upload_ok",
+                    "platform": "telegram",
+                    "artifact_id": descriptor.artifact_id,
+                    "byte_size": descriptor.byte_size,
+                },
+            )
             return UploadOutcome.UPLOADED
         except Exception as exc:
             name = type(exc).__name__.lower()
+            log.warning(
+                "telegram upload failed: %s",
+                type(exc).__name__,
+                extra={
+                    "event": "platform.upload_failed",
+                    "platform": "telegram",
+                    "artifact_id": descriptor.artifact_id,
+                },
+            )
             if "too" in name and "large" in name:
                 return UploadOutcome.TOO_LARGE
             if "retry" in name or "flood" in name:
@@ -182,9 +308,7 @@ class TelegramPlatformAdapter:
             return UploadOutcome.FAILED
 
     async def send_final(self, message_reference: MessageReference, view: FinalOutcomeView) -> None:
-        text = f"job {view.job_id.value} outcome={view.outcome}"
-        if view.download_url:
-            text = f"{text}\n{view.download_url}"
+        text = render_final(view)
         if self._bot is not None:
             from aiogram import Bot
 
@@ -197,11 +321,21 @@ class TelegramPlatformAdapter:
                 )
             except Exception:
                 await bot.send_message(chat_id=int(message_reference.chat_id), text=text)
+        log.info(
+            "telegram final outcome",
+            extra={
+                "event": "platform.final",
+                "platform": "telegram",
+                "job_id": view.job_id.value,
+                "outcome": view.outcome,
+                "error_code": view.error_code.value if view.error_code else None,
+            },
+        )
         self.calls.append(("send_final", (message_reference, view)))
 
     async def send_command_response(self, context: MessageContext, result: CommandResult) -> None:
-        text = f"{result.kind}: {getattr(result, 'message_key', '')}"
-        if self._bot is not None:
+        text = render_command_result(result)
+        if text is not None and self._bot is not None:
             from aiogram import Bot
 
             bot: Bot = self._bot  # type: ignore[assignment]

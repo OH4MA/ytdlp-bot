@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
@@ -31,6 +32,8 @@ from ytdlp_bot.domain.jobs import DownloadRequest, Job, JobPayload
 from ytdlp_bot.domain.progress import ProgressSnapshot
 from ytdlp_bot.ports.results import Ok
 from ytdlp_bot.ports.system import Clock, IdGenerator
+
+log = logging.getLogger("ytdlp_bot.jobs")
 
 
 class JobRepo(Protocol):
@@ -176,6 +179,16 @@ class JobService:
                     code=FailureCode.INTERNAL_ERROR,
                     message_key="failure.internal_error",
                 )
+        log.info(
+            "job accepted",
+            extra={
+                "event": "job.accepted",
+                "job_id": job_id.value,
+                "state": JobState.QUEUED.value,
+                "platform": identity.platform.value,
+                "source_display": validated.source_display,
+            },
+        )
         return AcceptedJob(job_id=job_id, state=JobState.QUEUED.value)
 
     async def status(self, *, identity: Identity, args: StatusArgs) -> CommandResult:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -10,13 +11,19 @@ from typing import Any, Protocol
 from ytdlp_bot.application.capacity_publish import PublishService
 from ytdlp_bot.application.delivery import DeliveryService
 from ytdlp_bot.application.progress_reporter import ProgressReporter
-from ytdlp_bot.domain.enums import JobState, MediaType, WorkerPhase
+from ytdlp_bot.domain.enums import FailureCode, JobState, MediaType, WorkerPhase
 from ytdlp_bot.domain.identity import ArtifactId, JobId
 from ytdlp_bot.domain.jobs import Artifact, Job
-from ytdlp_bot.domain.progress import ProgressSnapshot, progress_from_worker_values
+from ytdlp_bot.domain.progress import (
+    FinalOutcomeView,
+    ProgressSnapshot,
+    progress_from_worker_values,
+)
 from ytdlp_bot.ports.media import WorkerEvent
 from ytdlp_bot.ports.results import Ok
 from ytdlp_bot.ports.system import IdGenerator
+
+log = logging.getLogger("ytdlp_bot.orchestrator")
 
 
 class JobMut(Protocol):
@@ -66,6 +73,15 @@ class Orchestrator:
         if event.sequence <= job.last_event_sequence:
             return
         now: datetime = self.now_fn()  # type: ignore[operator]
+        log.debug(
+            "worker event",
+            extra={
+                "event": "worker.event",
+                "job_id": event.job_id.value,
+                "kind": event.kind,
+                "worker_phase": event.phase.value if event.phase else None,
+            },
+        )
 
         if event.kind == "phase_changed" and event.phase is not None:
             mapping = {
@@ -175,15 +191,62 @@ class Orchestrator:
                 self.progress.mark_terminal(job.job_id)
 
         if event.kind == "worker_failed":
+            if job.state in {
+                JobState.FAILED,
+                JobState.CANCELLED,
+                JobState.CANCELLED_BY_RESTART,
+                JobState.COMPLETED,
+                JobState.COMPLETED_WITH_ERRORS,
+            }:
+                return
+            fail_code = FailureCode.INTERNAL_ERROR
+            raw_code = event.payload.get("error_code") if event.payload else None
+            if isinstance(raw_code, str) and raw_code:
+                try:
+                    fail_code = FailureCode(raw_code)
+                except ValueError:
+                    fail_code = FailureCode.INTERNAL_ERROR
+            log.warning(
+                "worker failed",
+                extra={
+                    "event": "worker.failed",
+                    "job_id": job.job_id.value,
+                    "error_code": fail_code.value,
+                    "worker_phase": event.phase.value if event.phase else None,
+                },
+            )
             await self.payloads.delete(job.job_id)
             await self.jobs.transition(
                 job.job_id,
                 expected_version=job.version,
                 new_state=JobState.FAILED,
+                error_code=fail_code,
             )
             self.progress.mark_terminal(job.job_id)
+            if job.message_reference is not None:
+                await self.delivery.platform.send_final(
+                    job.message_reference,
+                    FinalOutcomeView(
+                        job_id=job.job_id,
+                        outcome="failed",
+                        message_key="outcome.failed",
+                        error_code=fail_code,
+                    ),
+                )
 
         if event.kind == "worker_cancelled":
+            if job.state in {
+                JobState.CANCELLED,
+                JobState.CANCELLED_BY_RESTART,
+                JobState.FAILED,
+                JobState.COMPLETED,
+                JobState.COMPLETED_WITH_ERRORS,
+            }:
+                return
+            log.info(
+                "worker cancelled",
+                extra={"event": "worker.cancelled", "job_id": job.job_id.value},
+            )
             await self.payloads.delete(job.job_id)
             await self.jobs.transition(
                 job.job_id,
@@ -191,3 +254,12 @@ class Orchestrator:
                 new_state=JobState.CANCELLED,
             )
             self.progress.mark_terminal(job.job_id)
+            if job.message_reference is not None:
+                await self.delivery.platform.send_final(
+                    job.message_reference,
+                    FinalOutcomeView(
+                        job_id=job.job_id,
+                        outcome="cancelled",
+                        message_key="outcome.cancelled",
+                    ),
+                )

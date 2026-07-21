@@ -32,6 +32,10 @@ _APPROVED_EXTRA = frozenset(
         "worker_phase",
         "attempt",
         "outcome",
+        "command",
+        "kind",
+        "worker_exit_code",
+        "reason",
     }
 )
 
@@ -55,6 +59,14 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
+# Third-party loggers that drown useful diagnostics when root is DEBUG.
+_QUIET_LOGGERS: tuple[str, ...] = (
+    "asyncio",
+    "aiosqlite",
+    "aiogram",
+)
+
+
 def configure_logging(*, level: str = "INFO", stream: Any | None = None) -> None:
     """Configure root logger with JSON formatter (idempotent enough for tests)."""
     root = logging.getLogger()
@@ -63,5 +75,6 @@ def configure_logging(*, level: str = "INFO", stream: Any | None = None) -> None
     handler.setFormatter(JsonFormatter())
     root.addHandler(handler)
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
-    # Quiet noisy third parties by default.
-    logging.getLogger("asyncio").setLevel(logging.WARNING)
+    # Keep app DEBUG usable without SQL/update-handling spam.
+    for name in _QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)

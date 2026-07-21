@@ -10,6 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from ytdlp_bot.adapters.platform.base import build_text_command_request
+from ytdlp_bot.adapters.platform.command_menu import command_description_map, command_menu_names
+from ytdlp_bot.adapters.platform.messages import (
+    render_command_result,
+    render_final,
+    render_job_accepted,
+    render_progress,
+)
 from ytdlp_bot.domain.commands import (
     AdminArgs,
     AdminStatus,
@@ -33,15 +40,8 @@ log = logging.getLogger("ytdlp_bot.discord")
 
 CommandHandler = Callable[[CommandRequest], Awaitable[CommandResult]]
 
-# zh-TW descriptions for application command schema (locale-facing).
-_DESC = {
-    CommandName.YTDL: "下載影片為 MP4",
-    CommandName.YTMP3: "下載音訊為 MP3",
-    CommandName.YTDL_STATUS: "查詢工作狀態",
-    CommandName.YTDL_CANCEL: "取消工作",
-    CommandName.YTDL_HELP: "顯示使用說明",
-    CommandName.YTDL_ADMIN: "管理員操作",
-}
+# zh-TW descriptions shared with Telegram command menu.
+_DESC = command_description_map()
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +126,7 @@ def canonical_slash_command_specs() -> tuple[SlashCommandSpec, ...]:
 
 
 def registered_command_names() -> tuple[str, ...]:
-    return tuple(spec.name for spec in canonical_slash_command_specs())
+    return command_menu_names()
 
 
 @dataclass
@@ -311,9 +311,48 @@ class DiscordPlatformAdapter:
                 upload_limit_bytes=_limit_from_interaction(interaction),
                 **kwargs,
             )
-            result = await handler(req)
-            # Never persist interaction token; followup is ephemeral transport only.
-            await interaction.followup.send(f"{result.kind}")
+            log.info(
+                "discord command received",
+                extra={
+                    "event": "platform.command",
+                    "platform": "discord",
+                    "command": command.value,
+                    "request_id": req.request_id,
+                },
+            )
+            try:
+                result = await handler(req)
+            except Exception:
+                log.exception(
+                    "discord command handler failed",
+                    extra={
+                        "event": "platform.command_error",
+                        "platform": "discord",
+                        "command": command.value,
+                        "request_id": req.request_id,
+                    },
+                )
+                raise
+            log.info(
+                "discord command result",
+                extra={
+                    "event": "platform.command_result",
+                    "platform": "discord",
+                    "command": command.value,
+                    "kind": result.kind,
+                    "request_id": req.request_id,
+                },
+            )
+            # Never persist interaction token; followup is transport only.
+            # AcceptedJob already posted via acknowledge_job; close thinking ephemerally.
+            if result.kind == "accepted_job":
+                await interaction.followup.send("已開始處理。", ephemeral=True)
+                return
+            text = render_command_result(result)
+            if text is not None:
+                await interaction.followup.send(text)
+            else:
+                await interaction.followup.send("已處理。", ephemeral=True)
 
         @tree.command(name="ytdl", description=_DESC[CommandName.YTDL])
         @app_commands.describe(url="媒體網址", quality="解析度上限")
@@ -418,8 +457,18 @@ class DiscordPlatformAdapter:
 
         @client.event
         async def on_ready() -> None:
-            await tree.sync()
-            log.info("discord ready commands=%s", ",".join(self.registered_commands))
+            # Global slash sync so the command menu appears for users (may take a short while).
+            synced = await tree.sync()
+            log.info(
+                "discord slash commands synced count=%s names=%s",
+                len(synced) if synced is not None else 0,
+                ",".join(self.registered_commands),
+                extra={
+                    "event": "platform.commands_registered",
+                    "platform": "discord",
+                    "command": ",".join(self.registered_commands),
+                },
+            )
 
         self._client = client
         await client.start(self.bot_token)
@@ -435,6 +484,7 @@ class DiscordPlatformAdapter:
         initial_state: JobState,
     ) -> MessageReference:
         self._msg_seq += 1
+        text = render_job_accepted(job_id, initial_state)
         ref = MessageReference(
             platform=Platform.DISCORD,
             chat_id=context.chat_id,
@@ -443,14 +493,21 @@ class DiscordPlatformAdapter:
         if self._client is not None:
             channel = self._client.get_channel(int(context.chat_id))  # type: ignore[union-attr]
             if channel is not None:
-                msg = await channel.send(  # type: ignore[union-attr]
-                    f"accepted job {job_id.value} state={initial_state.value}"
-                )
+                msg = await channel.send(text)  # type: ignore[union-attr]
                 ref = MessageReference(
                     platform=Platform.DISCORD,
                     chat_id=context.chat_id,
                     message_id=str(msg.id),
                 )
+        log.info(
+            "discord job acknowledged",
+            extra={
+                "event": "platform.ack",
+                "platform": "discord",
+                "job_id": job_id.value,
+                "state": initial_state.value,
+            },
+        )
         self.calls.append(("acknowledge_job", (job_id, initial_state, ref)))
         return ref
 
@@ -461,11 +518,20 @@ class DiscordPlatformAdapter:
         channel = self._client.get_channel(int(message_reference.chat_id))  # type: ignore[union-attr]
         if channel is None:
             return
+        text = render_progress(view)
         try:
             msg = await channel.fetch_message(int(message_reference.message_id))  # type: ignore[union-attr]
-            await msg.edit(content=f"job {view.job_id.value} {view.state} {view.percent or ''}%")
+            await msg.edit(content=text)
         except Exception as exc:
-            log.debug("discord edit failed: %s", type(exc).__name__)
+            log.debug(
+                "discord edit failed: %s",
+                type(exc).__name__,
+                extra={
+                    "event": "platform.edit_progress_failed",
+                    "platform": "discord",
+                    "job_id": view.job_id.value,
+                },
+            )
 
     async def upload_artifact(
         self, context: MessageContext, descriptor: ArtifactDescriptor
@@ -499,9 +565,17 @@ class DiscordPlatformAdapter:
 
     async def send_final(self, message_reference: MessageReference, view: FinalOutcomeView) -> None:
         self.calls.append(("send_final", (message_reference, view)))
-        content = f"job {view.job_id.value} {view.outcome}"
-        if view.download_url:
-            content = f"{content}\n{view.download_url}"
+        content = render_final(view)
+        log.info(
+            "discord final outcome",
+            extra={
+                "event": "platform.final",
+                "platform": "discord",
+                "job_id": view.job_id.value,
+                "outcome": view.outcome,
+                "error_code": view.error_code.value if view.error_code else None,
+            },
+        )
         if self._client is None:
             return
         channel = self._client.get_channel(int(message_reference.chat_id))  # type: ignore[union-attr]
@@ -515,11 +589,12 @@ class DiscordPlatformAdapter:
 
     async def send_command_response(self, context: MessageContext, result: CommandResult) -> None:
         self.calls.append(("send_command_response", (context, result)))
-        if self._client is None:
+        text = render_command_result(result)
+        if text is None or self._client is None:
             return
         channel = self._client.get_channel(int(context.chat_id))  # type: ignore[union-attr]
         if channel is not None:
-            await channel.send(f"{result.kind}")  # type: ignore[union-attr]
+            await channel.send(text)  # type: ignore[union-attr]
 
     def classify_error(self, exception: BaseException) -> tuple[PlatformErrorCode, bool]:
         name = type(exception).__name__.lower()

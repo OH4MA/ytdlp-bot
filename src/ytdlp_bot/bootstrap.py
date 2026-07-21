@@ -136,6 +136,15 @@ async def bootstrap(
     configure_logging(level="INFO")
 
     config = load_config_from_path(config_path, check_writable=check_writable)
+    # Apply configured log level (including DEBUG).
+    configure_logging(level=config.logging.level)
+    log.info(
+        "configuration loaded",
+        extra={
+            "event": "startup.config",
+            "component": "bootstrap",
+        },
+    )
     readiness.configuration = True
 
     lock = None
@@ -303,7 +312,20 @@ async def bootstrap(
     async def launch(job: Job) -> None:
         payload = await payloads.get(job.job_id)
         if payload is None:
+            log.warning(
+                "launch skipped: missing payload",
+                extra={"event": "job.launch_skip", "job_id": job.job_id.value},
+            )
             return
+        log.info(
+            "launching job",
+            extra={
+                "event": "job.launch",
+                "job_id": job.job_id.value,
+                "state": job.state.value,
+                "source_display": job.source_display,
+            },
+        )
         # Reserve capacity before spawning work.
         await capacity.reserve(
             job.job_id,

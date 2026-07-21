@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import sys
 from collections.abc import Awaitable, Callable
@@ -12,9 +13,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ytdlp_bot.adapters.media.worker_protocol import WorkerRequestMessage
+from ytdlp_bot.adapters.security.redaction import redact_value
 from ytdlp_bot.domain.enums import WorkerPhase
 from ytdlp_bot.domain.identity import JobId
 from ytdlp_bot.ports.media import EventSink, WorkerEvent, WorkerRequest
+
+log = logging.getLogger("ytdlp_bot.worker")
 
 WorkerRunner = Callable[[WorkerRequestMessage, EventSink], Awaitable[None]]
 
@@ -51,6 +55,14 @@ class ProcessWorkerSupervisor:
         if request.proxy_url:
             env["ALL_PROXY"] = request.proxy_url
 
+        log.info(
+            "worker spawn",
+            extra={
+                "event": "worker.spawn",
+                "job_id": request.job_id.value,
+                "component": "worker_supervisor",
+            },
+        )
         proc = await asyncio.create_subprocess_exec(
             self.python_executable,
             "-m",
@@ -78,6 +90,8 @@ class ProcessWorkerSupervisor:
         sink: EventSink,
     ) -> None:
         assert proc.stdout is not None
+        saw_terminal = False
+        event_count = 0
         try:
             while True:
                 raw = await proc.stdout.readline()
@@ -88,20 +102,85 @@ class ProcessWorkerSupervisor:
                     phase = None
                     if data.get("phase"):
                         phase = WorkerPhase(str(data["phase"]))
+                    kind = str(data.get("type", "unknown"))
+                    if kind in {"worker_failed", "worker_succeeded", "worker_cancelled"}:
+                        saw_terminal = True
+                    event_count += 1
+                    log.debug(
+                        "worker stdout event",
+                        extra={
+                            "event": "worker.stdout",
+                            "job_id": job_id,
+                            "kind": kind,
+                            "worker_phase": phase.value if phase else None,
+                        },
+                    )
                     await sink.emit(
                         WorkerEvent(
                             sequence=int(data.get("sequence", 0)),
                             job_id=JobId(job_id if len(job_id) >= 22 else job_id.ljust(22, "A")),
-                            kind=str(data.get("type", "unknown")),
+                            kind=kind,
                             phase=phase,
                             payload=data.get("payload")
                             if isinstance(data.get("payload"), dict)
                             else {},
                         )
                     )
-                except Exception:
+                except Exception as exc:
+                    log.debug(
+                        "worker stdout parse skipped: %s",
+                        type(exc).__name__,
+                        extra={"event": "worker.stdout_skip", "job_id": job_id},
+                    )
                     continue
-            await proc.wait()
+            rc = await proc.wait()
+            err_text = ""
+            if proc.stderr is not None:
+                err_raw = await proc.stderr.read()
+                err_text = redact_value(err_raw.decode("utf-8", errors="replace")[:800])
+            if rc != 0:
+                log.warning(
+                    "worker exited non-zero",
+                    extra={
+                        "event": "worker.exit",
+                        "job_id": job_id,
+                        "worker_exit_code": rc,
+                        "component": "worker_supervisor",
+                    },
+                )
+                if err_text.strip():
+                    log.warning(
+                        "worker stderr: %s",
+                        err_text,
+                        extra={"event": "worker.stderr", "job_id": job_id},
+                    )
+            else:
+                log.info(
+                    "worker exited ok",
+                    extra={
+                        "event": "worker.exit",
+                        "job_id": job_id,
+                        "worker_exit_code": 0,
+                        "component": "worker_supervisor",
+                    },
+                )
+            # Synthetic fail if process died without a terminal stdout event.
+            if rc != 0 and not saw_terminal:
+                try:
+                    await sink.emit(
+                        WorkerEvent(
+                            sequence=max(event_count, 1) + 10_000,
+                            job_id=JobId(job_id if len(job_id) >= 22 else job_id.ljust(22, "A")),
+                            kind="worker_failed",
+                            phase=WorkerPhase.POST_PROCESSING,
+                            payload={"error_code": "INTERNAL_ERROR", "from_exit": True},
+                        )
+                    )
+                except Exception:
+                    log.debug(
+                        "worker failed event emit skipped",
+                        extra={"event": "worker.fail_emit_skip", "job_id": job_id},
+                    )
         finally:
             self._procs.pop(job_id, None)
             self._tasks.pop(job_id, None)

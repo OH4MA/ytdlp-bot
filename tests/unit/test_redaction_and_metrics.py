@@ -76,6 +76,18 @@ def test_json_logging_redacts(caplog: pytest.LogCaptureFixture) -> None:
 
 
 @pytest.mark.unit
+def test_noisy_third_party_loggers_capped_at_warning() -> None:
+    stream = io.StringIO()
+    configure_logging(level="DEBUG", stream=stream)
+    for name in ("asyncio", "aiosqlite", "aiogram", "aiogram.event"):
+        assert logging.getLogger(name).getEffectiveLevel() >= logging.WARNING
+    # App loggers still follow root DEBUG.
+    app = logging.getLogger("ytdlp_bot.test.quiet")
+    app.debug("app debug line")
+    assert "app debug line" in stream.getvalue()
+
+
+@pytest.mark.unit
 def test_metrics_label_allowlist() -> None:
     m = InMemoryMetricsSink()
     m.incr("jobs_total", tags={"platform": "telegram", "outcome": "completed"})
