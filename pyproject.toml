@@ -33,6 +33,7 @@ packages = ["src/ytdlp_bot"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/ytdlp_bot/locales/zh_TW.json" = "ytdlp_bot/locales/zh_TW.json"
+"src/ytdlp_bot/adapters/persistence/sqlite/migrations/0001_initial.sql" = "ytdlp_bot/adapters/persistence/sqlite/migrations/0001_initial.sql"
 
 [tool.uv]
 package = true
