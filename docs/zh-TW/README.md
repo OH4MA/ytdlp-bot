@@ -70,4 +70,4 @@ docker compose up -d
 
 需真實憑證（不納入例行 CI）：於兩平台送出 `/ytdl`、`/ytmp3`，驗證進度、取消、狀態、上限內上傳、上限外簽章連結與重啟對帳。
 
-發行驗收追蹤將 AC01–AC18 對應至 `doc/tasks/progress.md` 與 `.github/workflows/ci.yml`。
+發行驗收：決定性閘道見 `.github/workflows/ci.yml`；本地 agent 現況見 `doc/current_progress.md`；歷史 AC 勾選帳本見 `doc/archive/tasks/progress.md`（已封存，非未完成工作）。

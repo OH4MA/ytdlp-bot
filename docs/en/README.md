@@ -70,4 +70,4 @@ Upgrade: pull image, `docker compose up -d`, confirm `/readyz`, run controlled l
 
 With real credentials (not part of routine CI): submit `/ytdl` and `/ytmp3` on both platforms, verify progress, cancel, status, direct upload below limit, signed link above limit, and restart reconciliation.
 
-Release acceptance traceability maps AC01–AC18 to `doc/tasks/progress.md` checkboxes and the CI job in `.github/workflows/ci.yml`.
+Release acceptance: deterministic gates live in `.github/workflows/ci.yml`. Local agent status: `doc/current_progress.md`. Historical AC checkbox ledger: `doc/archive/tasks/progress.md` (archived; not open work).

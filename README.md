@@ -30,4 +30,4 @@ uv run pytest
 
 ## Status
 
-Implementation is tracked in `doc/tasks/progress.md`.
+First-release status for agents: `doc/current_progress.md` (local). Historical task ledgers: `doc/archive/tasks/` (local, not open work).
