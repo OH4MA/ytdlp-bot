@@ -287,5 +287,34 @@ def issue_download_link(
     return signer.sign(claims, display_name=display_name)
 
 
+class DownloadLinkIssuer:
+    """Application-facing link issuer adapter (ports stay free of URL composition)."""
+
+    def __init__(self, signer: HmacTokenSigner) -> None:
+        self._signer = signer
+
+    def issue(
+        self,
+        *,
+        artifact_id: str,
+        display_name: str,
+        token_version: int,
+        now: datetime,
+        link_lifetime_seconds: int,
+        artifact_expires_at: datetime,
+        job_id: str | None = None,
+    ) -> IssuedLink:
+        return issue_download_link(
+            self._signer,
+            artifact_id=artifact_id,
+            display_name=display_name,
+            token_version=token_version,
+            now=now,
+            link_lifetime_seconds=link_lifetime_seconds,
+            artifact_expires_at=artifact_expires_at,
+            job_id=job_id,
+        )
+
+
 # Satisfy TokenSigner protocol structural typing via methods above.
 _ = TokenSigner
