@@ -20,7 +20,7 @@ async def test_eviction_oldest_ready_first() -> None:
     now = datetime(2026, 1, 1, tzinfo=UTC)
 
     async def make(i: int, ready: datetime) -> Artifact:
-        jid = JobId(("J" + str(i)) * 11)[:22].ljust(22, "A")
+        jid = JobId((("J" + str(i)) * 11)[:22].ljust(22, "A"))
         await jobs.create(
             Job(
                 job_id=jid,
@@ -43,7 +43,7 @@ async def test_eviction_oldest_ready_first() -> None:
                 ready_at=ready,
             )
         )
-        aid = ArtifactId(("A" + str(i)) * 11)[:22].ljust(22, "A")
+        aid = ArtifactId((("A" + str(i)) * 11)[:22].ljust(22, "A"))
         key = (("S" + str(i)) * 11)[:22].ljust(22, "A")
         return await arts.create_available(
             Artifact(
