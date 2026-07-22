@@ -74,7 +74,7 @@ async def test_sign_and_range_stream(tmp_path: Path) -> None:
             artifact_id=ArtifactId("A" * 22),
             job_id=job.job_id,
             storage_key=key,
-            display_name="clip.mp4",
+            display_name="影片 clip.mp4",
             media_type=MediaType.VIDEO_MP4,
             byte_size=len(payload),
             ready_at=now,

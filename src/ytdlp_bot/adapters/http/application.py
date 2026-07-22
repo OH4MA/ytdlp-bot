@@ -24,13 +24,15 @@ def create_app(
 
     async def download_handler(request: web.Request) -> web.StreamResponse:
         artifact_id = request.match_info["artifact_id"]
-        display_name = request.match_info["display_name"]
+        # aiohttp 會先解碼 match_info
+        # 簽章驗證必須使用原始 canonical path segment
+        display_name_path = request.rel_url.raw_path.rsplit("/", 1)[-1]
         # Do not log query string.
         query = dict(parse_qsl(request.query_string, keep_blank_values=False))
         status, headers, body = await downloads.handle(
             method=request.method,
             artifact_id=artifact_id,
-            display_name_path=display_name,
+            display_name_path=display_name_path,
             query=query,
             range_header=request.headers.get("Range"),
             holder_id=f"http:{id(request)}",
