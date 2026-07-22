@@ -1,6 +1,7 @@
 """Canonical user-facing command menu for Telegram and Discord.
 
-Telegram surfaces this via Bot API setMyCommands (the `/` menu).
+Telegram surfaces this via Bot API setMyCommands (the `/` autocomplete list)
+and a persistent ReplyKeyboardMarkup grid of `/command` buttons.
 Discord surfaces the same names/descriptions as application slash commands.
 """
 
@@ -50,3 +51,17 @@ def command_description_map() -> dict[CommandName, str]:
 def telegram_bot_command_dicts() -> list[dict[str, str]]:
     """Plain dict form for tests and set_my_commands payload inspection."""
     return [{"command": e.name, "description": e.description} for e in command_menu_entries()]
+
+
+def telegram_reply_keyboard_rows() -> tuple[tuple[str, ...], ...]:
+    """Two-column grid of slash command button labels for ReplyKeyboardMarkup.
+
+    Matches the Twitch Watchdog pattern: persistent buttons that send `/name`
+    as plain text when tapped (handled by the existing command parser).
+    """
+    names = [f"/{name}" for name in command_menu_names()]
+    rows: list[tuple[str, ...]] = []
+    for i in range(0, len(names), 2):
+        chunk = names[i : i + 2]
+        rows.append(tuple(chunk))
+    return tuple(rows)

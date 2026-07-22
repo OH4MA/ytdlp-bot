@@ -14,6 +14,7 @@ from ytdlp_bot.adapters.platform.command_menu import (
     command_menu_entries,
     command_menu_names,
     telegram_bot_command_dicts,
+    telegram_reply_keyboard_rows,
 )
 from ytdlp_bot.adapters.platform.messages import (
     render_command_result,
@@ -49,6 +50,23 @@ class TelegramPlatformAdapter:
     def command_menu_snapshot(self) -> list[dict[str, str]]:
         """Deterministic Telegram BotCommand menu (no Telegram API required)."""
         return telegram_bot_command_dicts()
+
+    def command_reply_keyboard_snapshot(self) -> list[list[str]]:
+        """Deterministic reply-keyboard rows (button labels only)."""
+        return [list(row) for row in telegram_reply_keyboard_rows()]
+
+    def _command_reply_markup(self) -> object:
+        """Persistent two-column command grid (ReplyKeyboardMarkup)."""
+        from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text=label) for label in row]
+                for row in telegram_reply_keyboard_rows()
+            ],
+            resize_keyboard=True,
+            is_persistent=True,
+        )
 
     async def register_bot_commands(self, bot: object) -> tuple[str, ...]:
         """Publish the `/` command menu via setMyCommands."""
@@ -192,7 +210,11 @@ class TelegramPlatformAdapter:
             from aiogram import Bot
 
             bot: Bot = self._bot  # type: ignore[assignment]
-            msg = await bot.send_message(chat_id=int(context.chat_id), text=text)
+            msg = await bot.send_message(
+                chat_id=int(context.chat_id),
+                text=text,
+                reply_markup=self._command_reply_markup(),  # type: ignore[arg-type]
+            )
             ref = MessageReference(
                 platform=Platform.TELEGRAM,
                 chat_id=context.chat_id,
@@ -320,7 +342,11 @@ class TelegramPlatformAdapter:
                     text=text,
                 )
             except Exception:
-                await bot.send_message(chat_id=int(message_reference.chat_id), text=text)
+                await bot.send_message(
+                    chat_id=int(message_reference.chat_id),
+                    text=text,
+                    reply_markup=self._command_reply_markup(),  # type: ignore[arg-type]
+                )
         log.info(
             "telegram final outcome",
             extra={
@@ -339,7 +365,12 @@ class TelegramPlatformAdapter:
             from aiogram import Bot
 
             bot: Bot = self._bot  # type: ignore[assignment]
-            await bot.send_message(chat_id=int(context.chat_id), text=text)
+            # Attach persistent command grid so chats match Twitch-style buttons.
+            await bot.send_message(
+                chat_id=int(context.chat_id),
+                text=text,
+                reply_markup=self._command_reply_markup(),  # type: ignore[arg-type]
+            )
         self.calls.append(("send_command_response", (context, result)))
 
     def classify_error(self, exception: BaseException) -> tuple[PlatformErrorCode, bool]:
