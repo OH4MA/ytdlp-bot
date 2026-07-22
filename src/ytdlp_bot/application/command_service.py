@@ -21,7 +21,6 @@ from ytdlp_bot.domain.commands import (
 )
 from ytdlp_bot.domain.enums import FailureCode
 from ytdlp_bot.domain.errors import AuthorizationError
-from ytdlp_bot.domain.locale import format_message, load_zh_tw_catalog
 
 
 class AdminServicePort(Protocol):
@@ -70,12 +69,21 @@ class CommandService:
         if request.command is CommandName.YTDL_HELP:
             assert isinstance(request.arguments, HelpArgs)
             try:
-                await self.jobs.auth.require_user_access(request.identity)
+                snap = await self.jobs.auth.require_user_access(
+                    request.identity,
+                    now=request.received_at,
+                    command="ytdl_help",
+                )
             except AuthorizationError as exc:
-                return UserError(code=exc.code, message_key=exc.failure.user_message_key)
-            catalog = load_zh_tw_catalog()
-            _ = format_message(catalog, "help.main", legal=catalog.get("legal.use_reminder", ""))
-            return HelpView()
+                return UserError(
+                    code=exc.code,
+                    message_key=exc.failure.user_message_key,
+                    safe_context=self.jobs.auth.identity_context(request.identity),
+                )
+            # Administrators get an extended help with /ytdl_admin subcommands.
+            if self.jobs.auth.is_administrator(request.identity, snap):
+                return HelpView(message_key="help.admin")
+            return HelpView(message_key="help.main")
         if request.command is CommandName.YTDL_ADMIN:
             assert isinstance(request.arguments, AdminArgs)
             if self.admin is None:
@@ -88,3 +96,26 @@ class CommandService:
             code=FailureCode.INVALID_COMMAND,
             message_key="failure.invalid_command",
         )
+
+    async def probe_inbound_message(
+        self,
+        *,
+        identity,
+        received_at,
+        command_hint: str = "message",
+    ) -> CommandResult | None:
+        """If the user is unauthorized under whitelist mode, record + return error.
+
+        Authorized users yield None so platform adapters can ignore non-commands.
+        """
+        try:
+            await self.jobs.auth.require_user_access(
+                identity, now=received_at, command=command_hint
+            )
+        except AuthorizationError as exc:
+            return UserError(
+                code=exc.code,
+                message_key=exc.failure.user_message_key,
+                safe_context=self.jobs.auth.identity_context(identity),
+            )
+        return None

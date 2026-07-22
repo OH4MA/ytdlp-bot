@@ -117,6 +117,7 @@ async def test_submit_status_cancel_help(services) -> None:
         )
     )
     assert isinstance(help_r, HelpView)
+    assert help_r.message_key == "help.main"
 
     cancelled = await cmd.handle(
         CommandRequest(

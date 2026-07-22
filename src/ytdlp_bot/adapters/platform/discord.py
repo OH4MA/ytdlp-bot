@@ -113,6 +113,7 @@ def canonical_slash_command_specs() -> tuple[SlashCommandSpec, ...]:
                         "whitelist_add",
                         "whitelist_remove",
                         "whitelist_list",
+                        "whitelist_pending",
                         "cancel",
                         "artifact_delete",
                         "setting_reset",
@@ -134,6 +135,7 @@ class DiscordPlatformAdapter:
     upload_limit_bytes: int = 10_485_760
     bot_token: str = ""
     command_handler: CommandHandler | None = None
+    access_probe: object | None = None
     calls: list[tuple[str, object]] = field(default_factory=list)
     _msg_seq: int = 0
     upload_outcome: UploadOutcome = UploadOutcome.UPLOADED
@@ -261,6 +263,8 @@ class DiscordPlatformAdapter:
             parts = ["whitelist", "remove", *tokens]
         elif action_name == "whitelist_list":
             parts = ["whitelist", "list", *tokens]
+        elif action_name == "whitelist_pending":
+            parts = ["whitelist", "pending"]
         elif action_name == "cancel":
             parts = ["cancel", tokens[0] if tokens else ""]
         elif action_name == "artifact_delete":
@@ -418,6 +422,7 @@ class DiscordPlatformAdapter:
                     "whitelist_add",
                     "whitelist_remove",
                     "whitelist_list",
+                    "whitelist_pending",
                     "cancel",
                     "artifact_delete",
                     "setting_reset",

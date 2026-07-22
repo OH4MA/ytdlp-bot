@@ -27,7 +27,7 @@ async def test_apply_fresh_and_idempotent(tmp_path: Path) -> None:
     conn = await open_connection(tmp_path / "service.sqlite3")
     try:
         applied = await apply_migrations(conn, now_ms=1_700_000_000_000)
-        assert applied == [1]
+        assert applied == [1, 2]
         again = await apply_migrations(conn, now_ms=1_700_000_000_001)
         assert again == []
 
@@ -41,6 +41,7 @@ async def test_apply_fresh_and_idempotent(tmp_path: Path) -> None:
             "service_state",
             "runtime_settings",
             "whitelist",
+            "access_denials",
             "admin_confirmations",
             "delivery_attempts",
             "platform_notifications",

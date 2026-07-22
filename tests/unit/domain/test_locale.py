@@ -17,6 +17,9 @@ def test_catalog_loads_and_has_legal_reminder() -> None:
     assert catalog["legal.use_reminder"]
     # Traditional Chinese characters present (heuristic).
     assert any("\u4e00" <= ch <= "\u9fff" for ch in catalog["help.main"])
+    assert "help.admin" in catalog
+    assert "/ytdl_admin" not in catalog["help.main"]
+    assert "whitelist pending" in catalog["help.admin"]
 
 
 @pytest.mark.unit

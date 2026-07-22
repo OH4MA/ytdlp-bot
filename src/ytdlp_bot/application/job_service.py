@@ -103,9 +103,15 @@ class JobService:
         args: YtdlArgs | Ytmp3Args,
     ) -> CommandResult:
         try:
-            await self.auth.require_user_access(identity)
+            await self.auth.require_user_access(
+                identity, now=self.clock.now(), command="ytdl" if isinstance(args, YtdlArgs) else "ytmp3"
+            )
         except AuthorizationError as exc:
-            return UserError(code=exc.code, message_key=exc.failure.user_message_key)
+            return UserError(
+                code=exc.code,
+                message_key=exc.failure.user_message_key,
+                safe_context=self.auth.identity_context(identity),
+            )
 
         if isinstance(args, YtdlArgs):
             mode = MediaMode.VIDEO
@@ -193,9 +199,15 @@ class JobService:
 
     async def status(self, *, identity: Identity, args: StatusArgs) -> CommandResult:
         try:
-            await self.auth.require_user_access(identity)
+            await self.auth.require_user_access(
+                identity, now=self.clock.now(), command="ytdl_status"
+            )
         except AuthorizationError as exc:
-            return UserError(code=exc.code, message_key=exc.failure.user_message_key)
+            return UserError(
+                code=exc.code,
+                message_key=exc.failure.user_message_key,
+                safe_context=self.auth.identity_context(identity),
+            )
 
         if args.job_id is None:
             jobs = await self.jobs.list_owned_recent(identity, limit=self.recent_limit)
@@ -213,11 +225,14 @@ class JobService:
             return StatusView(jobs=views, message_key="status.list_header")
 
         try:
-            job, _snap = await self.auth.require_job_owner(args.job_id, identity)
+            job, _snap = await self.auth.require_job_owner(
+                args.job_id, identity, now=self.clock.now()
+            )
         except (AuthorizationError, NotFoundError):
             return UserError(
                 code=FailureCode.NOT_AUTHORIZED,
                 message_key="failure.not_authorized",
+                safe_context=self.auth.identity_context(identity),
             )
         return StatusView(
             job_id=job.job_id,
@@ -231,11 +246,14 @@ class JobService:
 
     async def cancel(self, *, identity: Identity, args: CancelArgs) -> CommandResult:
         try:
-            job, _ = await self.auth.require_job_owner(args.job_id, identity)
+            job, _ = await self.auth.require_job_owner(
+                args.job_id, identity, now=self.clock.now()
+            )
         except (AuthorizationError, NotFoundError):
             return UserError(
                 code=FailureCode.NOT_AUTHORIZED,
                 message_key="failure.not_authorized",
+                safe_context=self.auth.identity_context(identity),
             )
         if job.state not in USER_CANCELLABLE_STATES and job.state is not JobState.CANCELLING:
             return StatusView(

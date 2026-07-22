@@ -128,6 +128,11 @@ class AdminWhitelistList:
 
 
 @dataclass(frozen=True, slots=True)
+class AdminWhitelistPending:
+    action: Literal["whitelist_pending"] = "whitelist_pending"
+
+
+@dataclass(frozen=True, slots=True)
 class AdminStatus:
     action: Literal["status"] = "status"
 
@@ -159,6 +164,7 @@ AdminAction = (
     | AdminWhitelistAdd
     | AdminWhitelistRemove
     | AdminWhitelistList
+    | AdminWhitelistPending
     | AdminStatus
     | AdminCancel
     | AdminArtifactDelete
@@ -486,6 +492,10 @@ def parse_admin_args(parts: list[str]) -> AdminArgs:
             elif len(rest) > 2:
                 raise _err("extra whitelist list arguments")
             return AdminArgs(action=AdminWhitelistList(platform=platform))
+        if sub == "pending":
+            if len(rest) > 1:
+                raise _err("extra whitelist pending arguments")
+            return AdminArgs(action=AdminWhitelistPending())
         if sub in {"add", "remove"}:
             if len(rest) != 3:
                 raise _err(f"whitelist {sub} requires platform and user_id")

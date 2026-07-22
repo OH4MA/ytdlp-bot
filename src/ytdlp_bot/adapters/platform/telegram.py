@@ -30,6 +30,8 @@ from ytdlp_bot.domain.progress import ArtifactDescriptor, FinalOutcomeView, Prog
 log = logging.getLogger("ytdlp_bot.telegram")
 
 CommandHandler = Callable[[CommandRequest], Awaitable[CommandResult]]
+# Optional hook for non-command text: returns a CommandResult when unauthorized.
+AccessProbe = Callable[..., Awaitable[CommandResult | None]]
 
 
 @dataclass
@@ -39,6 +41,7 @@ class TelegramPlatformAdapter:
     upload_limit_bytes: int = 50_000_000
     bot_token: str = ""
     command_handler: CommandHandler | None = None
+    access_probe: AccessProbe | None = None
     calls: list[tuple[str, object]] = field(default_factory=list)
     _msg_seq: int = 0
     upload_outcome: UploadOutcome = UploadOutcome.UPLOADED
@@ -181,8 +184,37 @@ class TelegramPlatformAdapter:
 
         @dp.message(F.text)
         async def on_text(message: Message) -> None:
-            # Ignore non-command noise.
-            return
+            # Non-menu text / unknown commands: still record unauthorized identities.
+            if message.from_user is None or message.text is None:
+                return
+            if self.access_probe is None:
+                return
+            from ytdlp_bot.domain.enums import Platform
+            from ytdlp_bot.domain.identity import Identity
+
+            try:
+                identity = Identity(
+                    platform=Platform.TELEGRAM,
+                    user_id=str(message.from_user.id),
+                )
+            except Exception:
+                return
+            result = await self.access_probe(
+                identity=identity,
+                received_at=datetime.now(UTC),
+                command_hint="message",
+            )
+            if result is None:
+                return
+            await self.send_command_response(
+                MessageContext(
+                    platform=Platform.TELEGRAM,
+                    chat_id=str(message.chat.id),
+                    response_target=str(message.chat.id),
+                    effective_upload_limit_bytes=self.upload_limit_bytes,
+                ),
+                result,
+            )
 
         self._running = True
         log.info(

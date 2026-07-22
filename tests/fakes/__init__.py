@@ -5,6 +5,7 @@ from tests.fakes.media import FakeMediaWorker
 from tests.fakes.network import FakeDnsResolver, FakeUrlPreflightClient
 from tests.fakes.platform import FakePlatformPort
 from tests.fakes.repositories import (
+    InMemoryAccessDenialRepository,
     InMemoryAccessRepository,
     InMemoryAdminConfirmationRepository,
     InMemoryArtifactRepository,
@@ -26,6 +27,7 @@ __all__ = [
     "FakeMediaWorker",
     "FakePlatformPort",
     "FakeUrlPreflightClient",
+    "InMemoryAccessDenialRepository",
     "InMemoryAccessRepository",
     "InMemoryAdminConfirmationRepository",
     "InMemoryArtifactRepository",

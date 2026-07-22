@@ -20,6 +20,7 @@ from ytdlp_bot.domain.commands import (
     AdminView,
     AdminWhitelistAdd,
     AdminWhitelistList,
+    AdminWhitelistPending,
     AdminWhitelistRemove,
     CommandRequest,
     CommandResult,
@@ -154,6 +155,7 @@ class AdminService:
             )
         if isinstance(action, AdminWhitelistAdd):
             await self.access.add_identity(action.identity, now=now)
+            await self.auth.clear_access_denial(action.identity)
             return AdminView(message_key="admin.view", safe_fields={"op": "whitelist_add"})
         if isinstance(action, AdminWhitelistRemove):
             await self.access.remove_identity(action.identity)
@@ -163,6 +165,22 @@ class AdminService:
             return AdminView(
                 message_key="admin.view",
                 safe_fields={"count": len(items)},
+            )
+        if isinstance(action, AdminWhitelistPending):
+            denials = await self.auth.list_access_denials(now=now, limit=20)
+            if not denials:
+                return AdminView(message_key="admin.whitelist_pending_empty")
+            lines: list[str] = []
+            for d in denials:
+                ident = d.identity
+                cmd = d.last_command or "-"
+                lines.append(
+                    f"• {ident.display()} — {d.attempt_count}x, cmd={cmd}\n"
+                    f"  /ytdl_admin whitelist add {ident.platform.value} {ident.user_id}"
+                )
+            return AdminView(
+                message_key="admin.whitelist_pending",
+                safe_fields={"count": len(denials), "body": "\n".join(lines)},
             )
         if isinstance(action, AdminCapacitySet):
             validate_setting_value("capacity_bytes", action.capacity_bytes)

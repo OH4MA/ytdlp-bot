@@ -20,6 +20,7 @@ from ytdlp_bot.adapters.network.resolver import SystemDnsResolver
 from ytdlp_bot.adapters.persistence.sqlite.connection import InstanceLock, open_connection
 from ytdlp_bot.adapters.persistence.sqlite.migrate import apply_migrations
 from ytdlp_bot.adapters.persistence.sqlite.repositories import (
+    SqliteAccessDenialRepository,
     SqliteAccessRepository,
     SqliteAdminConfirmationRepository,
     SqliteArtifactRepository,
@@ -196,6 +197,7 @@ async def bootstrap(
         },
     )
     access_repo = SqliteAccessRepository(conn, config.access.mode)
+    denial_repo = SqliteAccessDenialRepository(conn)
     confirmations = SqliteAdminConfirmationRepository(conn)
 
     dns = SystemDnsResolver(timeout_seconds=config.network.dns_timeout_seconds)
@@ -218,6 +220,7 @@ async def bootstrap(
         jobs=jobs,
         artifacts=arts,
         administrators=config.access.administrators,
+        denials=denial_repo,
     )
     url_safety = UrlSafetyService(
         dns=dns,
@@ -265,6 +268,8 @@ async def bootstrap(
 
     telegram.command_handler = command_service.handle
     discord.command_handler = command_service.handle
+    telegram.access_probe = command_service.probe_inbound_message
+    discord.access_probe = command_service.probe_inbound_message
 
     signer = HmacTokenSigner(
         config.artifacts.signing_secret.encode("utf-8"),

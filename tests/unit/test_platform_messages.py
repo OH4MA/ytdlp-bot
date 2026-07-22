@@ -28,6 +28,16 @@ def test_help_is_human_chinese() -> None:
     assert "可用指令" in text
     assert "/ytdl" in text
     assert "help.main" not in text
+    assert "/ytdl_admin" not in text
+
+
+def test_admin_help_lists_subcommands() -> None:
+    text = render_command_result(HelpView(message_key="help.admin"))
+    assert text is not None
+    assert "/ytdl_admin" in text
+    assert "whitelist pending" in text
+    assert "capacity set" in text
+    assert "help.admin" not in text
 
 
 def test_admin_status_interpolates_fields() -> None:

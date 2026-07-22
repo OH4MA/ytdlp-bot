@@ -1,7 +1,8 @@
 {
   "locale": "zh-TW",
   "legal.use_reminder": "請僅下載您有權存取的公開內容，並遵守來源網站與當地法律。",
-  "help.main": "可用指令：\n/ytdl <網址> [畫質]\n/ytmp3 <網址> [位元率]\n/ytdl_status [工作ID] [renew]\n/ytdl_cancel <工作ID>\n/ytdl_help\n/ytdl_admin …（管理員）\n\n{legal}",
+  "help.main": "可用指令：\n/ytdl <網址> [畫質]\n/ytmp3 <網址> [位元率]\n/ytdl_status [工作ID] [renew]\n/ytdl_cancel <工作ID>\n/ytdl_help\n\n{legal}",
+  "help.admin": "可用指令：\n/ytdl <網址> [畫質]\n/ytmp3 <網址> [位元率]\n/ytdl_status [工作ID] [renew]\n/ytdl_cancel <工作ID>\n/ytdl_help\n/ytdl_admin …（管理員）\n\n管理員 /ytdl_admin 子指令：\n• status — 服務狀態（容量等）\n• cancel <工作ID> — 強制取消任一工作\n• artifact delete <成品ID> — 刪除成品與檔案\n• retention set <時長> — 成品保留時間（如 12h、1d）\n• capacity set <大小> [確認碼] — 儲存上限（兩步確認，如 100GiB）\n• access-mode set allow_all|whitelist — 存取模式\n• whitelist list [platform] — 列出白名單\n• whitelist add <platform> <user_id> — 加入白名單\n• whitelist remove <platform> <user_id> — 移出白名單\n• whitelist pending — 最近未授權嘗試（約 7 天）\n• setting reset retention_seconds|link_expiry_seconds — 還原預設值\n\n說明：platform 為 telegram 或 discord；時長可用 30m/12h/1d 或秒數。管理員名單僅能改設定檔，無法用聊天指令變更。\n\n{legal}",
   "job.accepted": "已接受下載工作 {job_id}，狀態：{state}。",
   "job.id_line": "工作 ID: {job_id}",
   "job.state.queued": "排隊中",
@@ -47,7 +48,7 @@
   "warning.protocol_malformed_progress": "進度數值異常，已忽略無效欄位。",
   "failure.invalid_command": "指令或參數無效。",
   "failure.acknowledgement_failed": "無法建立進度訊息，請稍後再試。",
-  "failure.not_authorized": "您沒有權限執行此操作。",
+  "failure.not_authorized": "您沒有權限執行此操作。\n您的識別碼：{identity}\n請將此識別碼提供給管理員以申請白名單。",
   "failure.invalid_url": "網址格式無效或不支援。",
   "failure.blocked_destination": "目標位址不允許下載。",
   "failure.unsupported_source": "不支援或無法使用此來源。",
@@ -73,5 +74,7 @@
   "admin.setting_updated": "設定 {key}：{old} → {new}",
   "admin.confirmation_required": "此操作可能刪除既有成品。請在 60 秒內以確認碼 {confirmation_id} 再次送出。",
   "admin.not_admin": "需要管理員身分。",
+  "admin.whitelist_pending": "最近未授權嘗試（{count} 筆，約保留 7 天）：\n{body}",
+  "admin.whitelist_pending_empty": "目前沒有暫存的未授權識別碼。",
   "value.unknown": "未知"
 }

@@ -14,7 +14,7 @@ from ytdlp_bot.domain.enums import (
     JobState,
     Platform,
 )
-from ytdlp_bot.domain.identity import ArtifactId, Identity, JobId, MessageReference
+from ytdlp_bot.domain.identity import AccessDenial, ArtifactId, Identity, JobId, MessageReference
 from ytdlp_bot.domain.jobs import Artifact, Job, JobPayload, PlaylistEntry, RuntimeSetting
 from ytdlp_bot.domain.progress import ProgressSnapshot
 from ytdlp_bot.ports.results import Conflict, Ok, Result
@@ -176,6 +176,24 @@ class AccessRepository(Protocol):
     async def remove_identity(self, identity: Identity) -> bool: ...
 
 
+class AccessDenialRepository(Protocol):
+    """Temporary unauthorized-identity scratchpad for whitelist onboarding."""
+
+    async def record(
+        self,
+        identity: Identity,
+        *,
+        now: datetime,
+        command: str | None = None,
+    ) -> None: ...
+
+    async def list_recent(self, *, limit: int = 20) -> Sequence[AccessDenial]: ...
+
+    async def clear(self, identity: Identity) -> bool: ...
+
+    async def purge_older_than(self, *, cutoff: datetime) -> int: ...
+
+
 class CapacityRepository(Protocol):
     async def reserve(self, job_id: JobId, bytes_: int, *, now: datetime) -> Result[int]: ...
 
@@ -253,6 +271,7 @@ class NotificationOutboxRepository(Protocol):
 # Re-export for convenience.
 __all__ = [
     "AccessRepository",
+    "AccessDenialRepository",
     "AdminConfirmationRepository",
     "ArtifactAccessState",
     "ArtifactRepository",

@@ -171,7 +171,7 @@ def render_command_result(
         )
 
     if isinstance(result, UserError):
-        return format_message(catalog, result.message_key)
+        return format_message(catalog, result.message_key, **(result.safe_context or {}))
 
     if isinstance(result, AdminView):
         fields = dict(result.safe_fields or {})

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 
 from ytdlp_bot.domain.enums import FailureCode, Platform
 from ytdlp_bot.domain.errors import ValidationError, failure
@@ -80,6 +81,10 @@ class Identity:
     def to_dict(self) -> dict[str, str]:
         return {"platform": self.platform.value, "user_id": self.user_id}
 
+    def display(self) -> str:
+        """Canonical platform:user_id form for admin copy-paste."""
+        return f"{self.platform.value}:{self.user_id}"
+
     @classmethod
     def parse(cls, text: str) -> Identity:
         """Parse 'platform:user_id' configuration form."""
@@ -91,6 +96,17 @@ class Identity:
         except ValueError as exc:
             raise _invalid("identity", "unknown platform") from exc
         return cls(platform=platform, user_id=user_id)
+
+
+@dataclass(frozen=True, slots=True)
+class AccessDenial:
+    """One unauthorized identity observed while access_mode is whitelist."""
+
+    identity: Identity
+    first_seen_at: datetime
+    last_seen_at: datetime
+    attempt_count: int
+    last_command: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

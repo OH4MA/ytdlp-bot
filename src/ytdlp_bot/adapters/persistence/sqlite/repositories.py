@@ -14,6 +14,7 @@ from ytdlp_bot.adapters.persistence.sqlite.mappers import (
     dt_to_ms,
     job_from_row,
     job_to_context_json,
+    ms_to_dt,
     progress_to_json,
 )
 from ytdlp_bot.domain.enums import (
@@ -23,7 +24,7 @@ from ytdlp_bot.domain.enums import (
     JobState,
     Platform,
 )
-from ytdlp_bot.domain.identity import ArtifactId, Identity, JobId, MessageReference
+from ytdlp_bot.domain.identity import AccessDenial, ArtifactId, Identity, JobId, MessageReference
 from ytdlp_bot.domain.jobs import Artifact, Job, JobPayload, RuntimeSetting
 from ytdlp_bot.domain.progress import ProgressSnapshot
 from ytdlp_bot.ports.results import Conflict, Ok, Result
@@ -686,6 +687,91 @@ class SqliteAccessRepository:
         )
         await self._conn.commit()
         return cur.rowcount == 1
+
+
+class SqliteAccessDenialRepository:
+    """Persists unauthorized identities for short-lived admin review."""
+
+    def __init__(self, conn: aiosqlite.Connection) -> None:
+        self._conn = conn
+
+    async def record(
+        self,
+        identity: Identity,
+        *,
+        now: datetime,
+        command: str | None = None,
+    ) -> None:
+        now_ms = dt_to_ms(now)
+        cmd = (command or "")[:32] or None
+        await self._conn.execute(
+            """
+            INSERT INTO access_denials(
+              platform, user_id, first_seen_at, last_seen_at, attempt_count, last_command
+            ) VALUES (?, ?, ?, ?, 1, ?)
+            ON CONFLICT(platform, user_id) DO UPDATE SET
+              last_seen_at = excluded.last_seen_at,
+              attempt_count = access_denials.attempt_count + 1,
+              last_command = COALESCE(excluded.last_command, access_denials.last_command)
+            """,
+            (
+                identity.platform.value,
+                identity.user_id,
+                now_ms,
+                now_ms,
+                cmd,
+            ),
+        )
+        await self._conn.commit()
+
+    async def list_recent(self, *, limit: int = 20) -> Sequence[AccessDenial]:
+        cur = await self._conn.execute(
+            """
+            SELECT platform, user_id, first_seen_at, last_seen_at, attempt_count, last_command
+            FROM access_denials
+            ORDER BY last_seen_at DESC
+            LIMIT ?
+            """,
+            (max(1, min(limit, 50)),),
+        )
+        rows = await cur.fetchall()
+        out: list[AccessDenial] = []
+        for row in rows:
+            first = ms_to_dt(int(row["first_seen_at"]))
+            last = ms_to_dt(int(row["last_seen_at"]))
+            if first is None or last is None:
+                continue
+            out.append(
+                AccessDenial(
+                    identity=Identity(
+                        platform=Platform(str(row["platform"])),
+                        user_id=str(row["user_id"]),
+                    ),
+                    first_seen_at=first,
+                    last_seen_at=last,
+                    attempt_count=int(row["attempt_count"]),
+                    last_command=(
+                        str(row["last_command"]) if row["last_command"] is not None else None
+                    ),
+                )
+            )
+        return out
+
+    async def clear(self, identity: Identity) -> bool:
+        cur = await self._conn.execute(
+            "DELETE FROM access_denials WHERE platform = ? AND user_id = ?",
+            (identity.platform.value, identity.user_id),
+        )
+        await self._conn.commit()
+        return cur.rowcount == 1
+
+    async def purge_older_than(self, *, cutoff: datetime) -> int:
+        cur = await self._conn.execute(
+            "DELETE FROM access_denials WHERE last_seen_at < ?",
+            (dt_to_ms(cutoff),),
+        )
+        await self._conn.commit()
+        return int(cur.rowcount or 0)
 
 
 class SqliteCapacityRepository:

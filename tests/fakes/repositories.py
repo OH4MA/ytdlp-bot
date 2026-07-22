@@ -7,7 +7,7 @@ from copy import deepcopy
 from datetime import datetime
 
 from ytdlp_bot.domain.enums import AccessMode, ArtifactAccessState, DeletionReason, JobState
-from ytdlp_bot.domain.identity import ArtifactId, Identity, JobId, MessageReference
+from ytdlp_bot.domain.identity import AccessDenial, ArtifactId, Identity, JobId, MessageReference
 from ytdlp_bot.domain.jobs import Artifact, Job, JobPayload, RuntimeSetting
 from ytdlp_bot.domain.progress import ProgressSnapshot
 from ytdlp_bot.ports.results import Conflict, Ok, Result
@@ -377,6 +377,59 @@ class InMemoryAccessRepository:
             return False
         self._whitelist.remove(identity)
         return True
+
+
+class InMemoryAccessDenialRepository:
+    def __init__(self) -> None:
+        self._items: dict[tuple[str, str], AccessDenial] = {}
+
+    def reset(self) -> None:
+        self._items.clear()
+
+    async def record(
+        self,
+        identity: Identity,
+        *,
+        now: datetime,
+        command: str | None = None,
+    ) -> None:
+        key = (identity.platform.value, identity.user_id)
+        prev = self._items.get(key)
+        cmd = (command or "")[:32] or None
+        if prev is None:
+            self._items[key] = AccessDenial(
+                identity=identity,
+                first_seen_at=now,
+                last_seen_at=now,
+                attempt_count=1,
+                last_command=cmd,
+            )
+            return
+        self._items[key] = AccessDenial(
+            identity=identity,
+            first_seen_at=prev.first_seen_at,
+            last_seen_at=now,
+            attempt_count=prev.attempt_count + 1,
+            last_command=cmd if cmd is not None else prev.last_command,
+        )
+
+    async def list_recent(self, *, limit: int = 20) -> Sequence[AccessDenial]:
+        items = sorted(self._items.values(), key=lambda d: d.last_seen_at, reverse=True)
+        return items[: max(1, min(limit, 50))]
+
+    async def clear(self, identity: Identity) -> bool:
+        key = (identity.platform.value, identity.user_id)
+        if key not in self._items:
+            return False
+        del self._items[key]
+        return True
+
+    async def purge_older_than(self, *, cutoff: datetime) -> int:
+        before = len(self._items)
+        self._items = {
+            k: v for k, v in self._items.items() if v.last_seen_at >= cutoff
+        }
+        return before - len(self._items)
 
 
 class InMemoryCapacityRepository:
