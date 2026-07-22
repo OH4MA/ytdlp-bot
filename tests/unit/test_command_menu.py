@@ -90,8 +90,8 @@ async def test_telegram_register_bot_commands_calls_api() -> None:
 @pytest.mark.asyncio
 async def test_send_command_response_attaches_reply_keyboard() -> None:
     from ytdlp_bot.domain.commands import HelpView
-    from ytdlp_bot.domain.identity import MessageContext
     from ytdlp_bot.domain.enums import Platform
+    from ytdlp_bot.domain.identity import MessageContext
 
     adapter = TelegramPlatformAdapter()
     bot = MagicMock()
@@ -113,5 +113,3 @@ async def test_send_command_response_attaches_reply_keyboard() -> None:
     assert markup.is_persistent is True
     labels = [btn.text for row in markup.keyboard for btn in row]
     assert labels == [f"/{n}" for n in command_menu_names()]
-
-

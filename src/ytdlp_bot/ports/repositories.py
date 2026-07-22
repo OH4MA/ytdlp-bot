@@ -270,8 +270,8 @@ class NotificationOutboxRepository(Protocol):
 
 # Re-export for convenience.
 __all__ = [
-    "AccessRepository",
     "AccessDenialRepository",
+    "AccessRepository",
     "AdminConfirmationRepository",
     "ArtifactAccessState",
     "ArtifactRepository",

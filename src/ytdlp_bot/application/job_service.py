@@ -104,7 +104,9 @@ class JobService:
     ) -> CommandResult:
         try:
             await self.auth.require_user_access(
-                identity, now=self.clock.now(), command="ytdl" if isinstance(args, YtdlArgs) else "ytmp3"
+                identity,
+                now=self.clock.now(),
+                command="ytdl" if isinstance(args, YtdlArgs) else "ytmp3",
             )
         except AuthorizationError as exc:
             return UserError(
@@ -246,9 +248,7 @@ class JobService:
 
     async def cancel(self, *, identity: Identity, args: CancelArgs) -> CommandResult:
         try:
-            job, _ = await self.auth.require_job_owner(
-                args.job_id, identity, now=self.clock.now()
-            )
+            job, _ = await self.auth.require_job_owner(args.job_id, identity, now=self.clock.now())
         except (AuthorizationError, NotFoundError):
             return UserError(
                 code=FailureCode.NOT_AUTHORIZED,

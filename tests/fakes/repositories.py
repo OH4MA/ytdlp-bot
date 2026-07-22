@@ -426,9 +426,7 @@ class InMemoryAccessDenialRepository:
 
     async def purge_older_than(self, *, cutoff: datetime) -> int:
         before = len(self._items)
-        self._items = {
-            k: v for k, v in self._items.items() if v.last_seen_at >= cutoff
-        }
+        self._items = {k: v for k, v in self._items.items() if v.last_seen_at >= cutoff}
         return before - len(self._items)
 
 
