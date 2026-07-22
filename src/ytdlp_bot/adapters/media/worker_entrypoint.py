@@ -96,9 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             media_type = "audio/mpeg" if mode is MediaMode.AUDIO else "video/mp4"
             ext = out.suffix.lstrip(".") or ("mp3" if mode is MediaMode.AUDIO else "mp4")
             # Prefer original title; fallback to on-disk name (title-based outtmpl).
-            name = (
-                build_artifact_display_name(media_title, ext) if media_title else out.name
-            )
+            name = build_artifact_display_name(media_title, ext) if media_title else out.name
 
         emit("phase_changed", phase=WorkerPhase.POST_PROCESSING.value)
         emit(

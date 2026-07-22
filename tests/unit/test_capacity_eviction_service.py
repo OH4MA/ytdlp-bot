@@ -130,8 +130,12 @@ async def test_ensure_capacity_evicts_oldest_first(tmp_path: Path) -> None:
 
     ok = await evictor.ensure_capacity(needed_bytes=3_000, now=now)
     assert ok is True
-    assert (await arts.get(a0.artifact_id)).access_state is ArtifactAccessState.DELETED
-    assert (await arts.get(a1.artifact_id)).access_state is ArtifactAccessState.AVAILABLE
+    deleted_artifact = await arts.get(a0.artifact_id)
+    available_artifact = await arts.get(a1.artifact_id)
+    assert deleted_artifact is not None
+    assert available_artifact is not None
+    assert deleted_artifact.access_state is ArtifactAccessState.DELETED
+    assert available_artifact.access_state is ArtifactAccessState.AVAILABLE
     job0 = await jobs.get(j0.job_id)
     assert job0 is not None and job0.state is JobState.EVICTED
     snap = await cap.snapshot()
@@ -183,8 +187,12 @@ async def test_ensure_capacity_skips_leased_then_evicts_next(tmp_path: Path) -> 
 
     ok = await evictor.ensure_capacity(needed_bytes=3_000, now=now)
     assert ok is True
-    assert (await arts.get(a0.artifact_id)).access_state is ArtifactAccessState.AVAILABLE
-    assert (await arts.get(a1.artifact_id)).access_state is ArtifactAccessState.DELETED
+    leased_artifact = await arts.get(a0.artifact_id)
+    deleted_artifact = await arts.get(a1.artifact_id)
+    assert leased_artifact is not None
+    assert deleted_artifact is not None
+    assert leased_artifact.access_state is ArtifactAccessState.AVAILABLE
+    assert deleted_artifact.access_state is ArtifactAccessState.DELETED
     job1 = await jobs.get(j1.job_id)
     assert job1 is not None and job1.state is JobState.EVICTED
 
@@ -223,7 +231,9 @@ async def test_ensure_capacity_all_leased_returns_false(tmp_path: Path) -> None:
 
     ok = await evictor.ensure_capacity(needed_bytes=2_000, now=now)
     assert ok is False
-    assert (await arts.get(a0.artifact_id)).access_state is ArtifactAccessState.AVAILABLE
+    leased_artifact = await arts.get(a0.artifact_id)
+    assert leased_artifact is not None
+    assert leased_artifact.access_state is ArtifactAccessState.AVAILABLE
     with pytest.raises(DomainError):
         await cap.reserve(JobId("N" * 22), known_size=2_000, now=now)
 
