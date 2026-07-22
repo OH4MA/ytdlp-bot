@@ -1,8 +1,9 @@
 """Canonical user-facing command menu for Telegram and Discord.
 
-Telegram surfaces this via Bot API setMyCommands (the `/` autocomplete list)
-and a persistent ReplyKeyboardMarkup grid of `/command` buttons.
-Discord surfaces the same names/descriptions as application slash commands.
+Both platforms share the same six command names and zh-TW descriptions.
+Telegram: setMyCommands (`/` autocomplete) plus a persistent ReplyKeyboardMarkup
+grid of `/command` buttons (Telegram-only surface; Discord has no reply keyboard).
+Discord: the same catalog as application slash commands.
 """
 
 from __future__ import annotations

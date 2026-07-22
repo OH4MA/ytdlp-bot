@@ -160,7 +160,7 @@ def render_command_result(
     catalog = _catalog()
 
     if isinstance(result, AcceptedJob):
-        # acknowledge_job already sent the editable acceptance message.
+        # acknowledge_job already sent the acceptance message.
         return None
 
     if isinstance(result, HelpView):

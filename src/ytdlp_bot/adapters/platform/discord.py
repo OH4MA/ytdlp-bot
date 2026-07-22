@@ -564,6 +564,7 @@ class DiscordPlatformAdapter:
             return UploadOutcome.FAILED
 
     async def send_final(self, message_reference: MessageReference, view: FinalOutcomeView) -> None:
+        """Post completion as a new message (do not edit the progress bubble)."""
         self.calls.append(("send_final", (message_reference, view)))
         content = render_final(view)
         log.info(
@@ -581,11 +582,7 @@ class DiscordPlatformAdapter:
         channel = self._client.get_channel(int(message_reference.chat_id))  # type: ignore[union-attr]
         if channel is None:
             return
-        try:
-            msg = await channel.fetch_message(int(message_reference.message_id))  # type: ignore[union-attr]
-            await msg.edit(content=content)
-        except Exception:
-            await channel.send(content)  # type: ignore[union-attr]
+        await channel.send(content)  # type: ignore[union-attr]
 
     async def send_command_response(self, context: MessageContext, result: CommandResult) -> None:
         self.calls.append(("send_command_response", (context, result)))

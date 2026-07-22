@@ -1,8 +1,16 @@
-"""Shared platform adapter contract suite for Telegram and Discord."""
+"""Shared platform adapter contract suite for Telegram and Discord.
+
+Presentation policy (TG and DC stay aligned unless the platform has no
+equivalent surface — e.g. Telegram ReplyKeyboard vs Discord slash menu):
+- acknowledge_job: new message
+- edit_progress: may update the ack/progress bubble in place
+- send_final: always a new message (never edit the progress bubble)
+"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -10,7 +18,7 @@ from ytdlp_bot.adapters.platform.discord import DiscordPlatformAdapter
 from ytdlp_bot.adapters.platform.telegram import TelegramPlatformAdapter
 from ytdlp_bot.domain.commands import HelpView
 from ytdlp_bot.domain.enums import JobState, Platform
-from ytdlp_bot.domain.identity import JobId, MessageContext
+from ytdlp_bot.domain.identity import JobId, MessageContext, MessageReference
 from ytdlp_bot.domain.progress import (
     ArtifactDescriptor,
     FinalOutcomeView,
@@ -91,3 +99,61 @@ async def test_platform_contract_suite(adapter_cls, platform: Platform) -> None:
     )
     await adapter.send_command_response(ctx, HelpView())
     assert adapter.classify_error(RuntimeError("x"))[0].value
+
+
+@pytest.mark.contract
+@pytest.mark.asyncio
+async def test_telegram_send_final_posts_new_message_not_edit() -> None:
+    adapter = TelegramPlatformAdapter()
+    bot = MagicMock()
+    bot.send_message = AsyncMock(return_value=MagicMock(message_id=99))
+    bot.edit_message_text = AsyncMock()
+    adapter._bot = bot
+
+    ref = MessageReference(platform=Platform.TELEGRAM, chat_id="42", message_id="7")
+    await adapter.send_final(
+        ref,
+        FinalOutcomeView(
+            job_id=JobId("J" * 22),
+            outcome="completed",
+            message_key="outcome.completed",
+            download_url="https://example.invalid/a",
+        ),
+    )
+    bot.edit_message_text.assert_not_awaited()
+    bot.send_message.assert_awaited_once()
+    kwargs = bot.send_message.await_args.kwargs
+    assert kwargs["chat_id"] == 42
+    assert "https://example.invalid/a" in kwargs["text"]
+
+
+@pytest.mark.contract
+@pytest.mark.asyncio
+async def test_discord_send_final_posts_new_message_not_edit() -> None:
+    adapter = DiscordPlatformAdapter()
+    msg = MagicMock()
+    msg.edit = AsyncMock()
+    channel = MagicMock()
+    channel.fetch_message = AsyncMock(return_value=msg)
+    channel.send = AsyncMock(return_value=MagicMock(id=99))
+    client = MagicMock()
+    client.get_channel = MagicMock(return_value=channel)
+    adapter._client = client
+
+    ref = MessageReference(platform=Platform.DISCORD, chat_id="42", message_id="7")
+    await adapter.send_final(
+        ref,
+        FinalOutcomeView(
+            job_id=JobId("J" * 22),
+            outcome="completed",
+            message_key="outcome.completed",
+            download_url="https://example.invalid/a",
+        ),
+    )
+    channel.fetch_message.assert_not_awaited()
+    msg.edit.assert_not_awaited()
+    channel.send.assert_awaited_once()
+    args, kwargs = channel.send.await_args
+    content = args[0] if args else kwargs.get("content")
+    assert content is not None
+    assert "https://example.invalid/a" in content

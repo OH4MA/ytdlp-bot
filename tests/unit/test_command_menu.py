@@ -113,3 +113,5 @@ async def test_send_command_response_attaches_reply_keyboard() -> None:
     assert markup.is_persistent is True
     labels = [btn.text for row in markup.keyboard for btn in row]
     assert labels == [f"/{n}" for n in command_menu_names()]
+
+

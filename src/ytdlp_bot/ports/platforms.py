@@ -36,7 +36,13 @@ class PlatformPort(Protocol):
         self,
         message_reference: MessageReference,
         view: FinalOutcomeView,
-    ) -> None: ...
+    ) -> None:
+        """Post the final outcome as a new chat message.
+
+        Implementations must not edit the progress/ack bubble. Telegram and
+        Discord keep this presentation policy in lockstep.
+        """
+        ...
 
     async def send_command_response(
         self,

@@ -330,23 +330,17 @@ class TelegramPlatformAdapter:
             return UploadOutcome.FAILED
 
     async def send_final(self, message_reference: MessageReference, view: FinalOutcomeView) -> None:
+        """Post completion as a new message (do not edit the progress bubble)."""
         text = render_final(view)
         if self._bot is not None:
             from aiogram import Bot
 
             bot: Bot = self._bot  # type: ignore[assignment]
-            try:
-                await bot.edit_message_text(
-                    chat_id=int(message_reference.chat_id),
-                    message_id=int(message_reference.message_id),
-                    text=text,
-                )
-            except Exception:
-                await bot.send_message(
-                    chat_id=int(message_reference.chat_id),
-                    text=text,
-                    reply_markup=self._command_reply_markup(),  # type: ignore[arg-type]
-                )
+            await bot.send_message(
+                chat_id=int(message_reference.chat_id),
+                text=text,
+                reply_markup=self._command_reply_markup(),  # type: ignore[arg-type]
+            )
         log.info(
             "telegram final outcome",
             extra={
